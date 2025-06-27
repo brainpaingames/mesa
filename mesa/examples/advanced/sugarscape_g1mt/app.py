@@ -1,10 +1,15 @@
-from mesa.examples.advanced.sugarscape_g1mt.model import SugarscapeG1mt
+# The model class is imported directly, not relatively
+from model import SugarscapeG1mt
 from mesa.visualization import Slider, SolaraViz, make_plot_component
+# We MUST import PropertyLayerStyle because we are going to use it.
 from mesa.visualization.components import AgentPortrayalStyle, PropertyLayerStyle
 from mesa.visualization.components.matplotlib_components import make_mpl_space_component
 
 
 def agent_portrayal(agent):
+    """
+    Defines how to draw the agents on the grid.
+    """
     return AgentPortrayalStyle(
         x=agent.cell.coordinate[0],
         y=agent.cell.coordinate[1],
@@ -16,18 +21,24 @@ def agent_portrayal(agent):
 
 
 def propertylayer_portrayal(layer):
-    if layer.name == "sugar":
-        return PropertyLayerStyle(
-            color="blue", alpha=0.8, colorbar=True, vmin=0, vmax=10
-        )
-    return PropertyLayerStyle(color="red", alpha=0.8, colorbar=True, vmin=0, vmax=10)
+    """
+    Defines how to draw the property layer (sugar) on the grid.
+    This function must return a PropertyLayerStyle object. The visualization
+    engine will use the single 'color' provided and vary its intensity.
+    """
+    # We will use "green" for the sugar layer. This is a valid single color.
+    return PropertyLayerStyle(
+        color="green",
+        alpha=0.8,
+        colorbar=True,
+        vmin=0,
+        vmax=10
+    )
 
 
 sugarscape_space = make_mpl_space_component(
     agent_portrayal=agent_portrayal,
     propertylayer_portrayal=propertylayer_portrayal,
-    post_process=None,
-    draw_grid=False,
 )
 
 model_params = {
@@ -51,21 +62,21 @@ model_params = {
     # Vision parameters
     "vision_min": Slider("Min Vision", value=1, min=1, max=3, step=1),
     "vision_max": Slider("Max Vision", value=5, min=3, max=8, step=1),
-    # Trade parameter
-    "enable_trade": {"type": "Checkbox", "value": True, "label": "Enable Trading"},
 }
 
+# The model class is imported from model.py
 model = SugarscapeG1mt()
 
+# The visualization page
 page = SolaraViz(
     model,
     components=[
         sugarscape_space,
         make_plot_component("#Traders"),
-        make_plot_component("Price"),
+        make_plot_component("Total Sugar"),
     ],
     model_params=model_params,
-    name="Sugarscape {G1, M, T}",
+    name="Sugarscape (Sugar-Only Baseline)",
     play_interval=150,
 )
 page  # noqa
