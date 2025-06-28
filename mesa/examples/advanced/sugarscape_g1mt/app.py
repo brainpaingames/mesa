@@ -10,6 +10,17 @@ def agent_portrayal(agent):
     """
     Defines how to draw the agents on the grid.
     """
+    # --- START of Functional Change for Milestone 2 ---
+    if agent.is_investing:
+        return AgentPortrayalStyle(
+            x=agent.cell.coordinate[0],
+            y=agent.cell.coordinate[1],
+            color="blue",
+            marker="s",
+            size=20,
+            zorder=2,
+        )
+    # --- END of Functional Change for Milestone 2 ---
     return AgentPortrayalStyle(
         x=agent.cell.coordinate[0],
         y=agent.cell.coordinate[1],
@@ -74,9 +85,15 @@ page = SolaraViz(
         sugarscape_space,
         make_plot_component("#Traders"),
         make_plot_component("Total Sugar"),
+        # --- START of Functional Change for Milestone 2 ---
+        make_plot_component("Investing Agents"),
+        make_plot_component("Average Metabolism"),
+        # --- END of Functional Change for Milestone 2 ---
     ],
     model_params=model_params,
-    name="Sugarscape (Sugar-Only Baseline)",
+    # --- START of Functional Change for Milestone 2 ---
+    name="Sugarscape with Investment",
+    # --- END of Functional Change for Milestone 2 ---
     play_interval=150,
 )
 page  # noqa

@@ -40,12 +40,16 @@ class SugarscapeG1mt(mesa.Model):
             (self.width, self.height), torus=False, random=self.random
         )
         # Initiate datacollector
+        # --- START of Functional Change for Milestone 2 ---
         self.datacollector = mesa.DataCollector(
             model_reporters={
                 "#Traders": lambda m: len(m.agents),
                 "Total Sugar": lambda m: sum(a.sugar for a in m.agents),
+                "Investing Agents": lambda m: len([a for a in m.agents if a.is_investing]),
+                "Average Metabolism": lambda m: np.mean([a.metabolism_sugar for a in m.agents]) if m.agents else 0,
             },
         )
+        # --- END of Functional Change for Milestone 2 ---
 
         # Read in landscape file from supplementary material
         self.sugar_distribution = np.genfromtxt(Path(__file__).parent / "sugar-map.txt")
@@ -84,10 +88,10 @@ class SugarscapeG1mt(mesa.Model):
         # iterate over.
         trader_shuffle = self.agents_by_type[Trader].shuffle()
 
+        # --- START of Functional Change for Milestone 2 ---
         for agent in trader_shuffle:
-            agent.move()
-            agent.eat()
-            agent.maybe_die()
+            agent.step()
+        # --- END of Functional Change for Milestone 2 ---
 
         # Collect model level data
         self.datacollector.collect(self)
