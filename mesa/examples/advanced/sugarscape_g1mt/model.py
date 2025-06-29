@@ -5,13 +5,12 @@ import numpy as np
 import mesa
 from mesa.discrete_space import OrthogonalVonNeumannGrid
 from mesa.discrete_space.property_layer import PropertyLayer
-# The agent class is imported directly, not relatively
 from agents import Trader
 
 
 class SugarscapeG1mt(mesa.Model):
     """
-    A simplified manager class to run a Sugarscape with sugar-only Traders.
+    A manager class to run a Sugarscape where agents can invest.
     """
 
     def __init__(
@@ -25,12 +24,28 @@ class SugarscapeG1mt(mesa.Model):
         metabolism_max=5,
         vision_min=1,
         vision_max=5,
+        # --- START of Functional Additions ---
+        enable_investment=True,
+        investment_cost=10,
+        investment_duration=5,
+        metabolism_reduction_factor=0.8,
+        agent_look_ahead_horizon=15,
+        # --- END of Functional Additions ---
         seed=None,
     ):
         super().__init__(seed=seed)
         # Initiate width and height of sugarscape
         self.width = width
         self.height = height
+
+        # --- START of Functional Additions ---
+        # Store model parameters
+        self.enable_investment = enable_investment
+        self.investment_cost = investment_cost
+        self.investment_duration = investment_duration
+        self.metabolism_reduction_factor = metabolism_reduction_factor
+        self.agent_look_ahead_horizon = agent_look_ahead_horizon
+        # --- END of Functional Additions ---
 
         # Initiate population attributes
         self.running = True
@@ -39,8 +54,8 @@ class SugarscapeG1mt(mesa.Model):
         self.grid = OrthogonalVonNeumannGrid(
             (self.width, self.height), torus=False, random=self.random
         )
-        # Initiate datacollector
-        # --- START of Functional Change for Milestone 2 ---
+        
+        # Updated DataCollector for new metrics
         self.datacollector = mesa.DataCollector(
             model_reporters={
                 "#Traders": lambda m: len(m.agents),
@@ -49,9 +64,7 @@ class SugarscapeG1mt(mesa.Model):
                 "Average Metabolism": lambda m: np.mean([a.metabolism_sugar for a in m.agents]) if m.agents else 0,
             },
         )
-        # --- END of Functional Change for Milestone 2 ---
 
-        # Read in landscape file from supplementary material
         self.sugar_distribution = np.genfromtxt(Path(__file__).parent / "sugar-map.txt")
         self.grid.add_property_layer(
             PropertyLayer.from_data("sugar", self.sugar_distribution)
@@ -87,11 +100,8 @@ class SugarscapeG1mt(mesa.Model):
         # To account for agent death and removal, we need a separate data structure to
         # iterate over.
         trader_shuffle = self.agents_by_type[Trader].shuffle()
-
-        # --- START of Functional Change for Milestone 2 ---
         for agent in trader_shuffle:
             agent.step()
-        # --- END of Functional Change for Milestone 2 ---
 
         # Collect model level data
         self.datacollector.collect(self)

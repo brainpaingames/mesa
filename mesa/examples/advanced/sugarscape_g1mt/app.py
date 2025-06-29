@@ -10,7 +10,6 @@ def agent_portrayal(agent):
     """
     Defines how to draw the agents on the grid.
     """
-    # --- START of Functional Change for Milestone 2 ---
     if agent.is_investing:
         return AgentPortrayalStyle(
             x=agent.cell.coordinate[0],
@@ -20,7 +19,6 @@ def agent_portrayal(agent):
             size=20,
             zorder=2,
         )
-    # --- END of Functional Change for Milestone 2 ---
     return AgentPortrayalStyle(
         x=agent.cell.coordinate[0],
         y=agent.cell.coordinate[1],
@@ -73,6 +71,14 @@ model_params = {
     # Vision parameters
     "vision_min": Slider("Min Vision", value=1, min=1, max=3, step=1),
     "vision_max": Slider("Max Vision", value=5, min=3, max=8, step=1),
+    # --- START of Functional Additions ---
+    # Investment parameters
+    "enable_investment": {"type": "Checkbox", "value": True, "label": "Enable Investment"},
+    "investment_cost": Slider("Investment Cost", value=10, min=0, max=50, step=1),
+    "investment_duration": Slider("Investment Duration", value=5, min=1, max=20, step=1),
+    "metabolism_reduction_factor": Slider("Metabolism Reduction Factor", value=0.8, min=0.1, max=1.0, step=0.05),
+    "agent_look_ahead_horizon": Slider("Agent Planning Horizon", value=15, min=5, max=50, step=1),
+    # --- END of Functional Additions ---
 }
 
 # The model class is imported from model.py
@@ -85,15 +91,11 @@ page = SolaraViz(
         sugarscape_space,
         make_plot_component("#Traders"),
         make_plot_component("Total Sugar"),
-        # --- START of Functional Change for Milestone 2 ---
         make_plot_component("Investing Agents"),
         make_plot_component("Average Metabolism"),
-        # --- END of Functional Change for Milestone 2 ---
     ],
     model_params=model_params,
-    # --- START of Functional Change for Milestone 2 ---
     name="Sugarscape with Investment",
-    # --- END of Functional Change for Milestone 2 ---
     play_interval=150,
 )
 page  # noqa

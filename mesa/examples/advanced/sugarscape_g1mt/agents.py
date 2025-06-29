@@ -18,16 +18,11 @@ def get_distance(cell_1, cell_2):
 
 class Trader(CellAgent):
     """
-    A trader agent that only focuses on sugar.
+    A trader agent that can choose between foraging and investing.
     - Has a metabolism of sugar.
     - Harvests sugar to survive.
+    - Can invest sugar to permanently reduce metabolism.
     """
-    # --- START of Functional Additions for Milestone 2 ---
-    INVESTMENT_DURATION = 3
-    INVESTMENT_COST = 1
-    METABOLISM_REDUCTION_FACTOR = 0.3
-    LOOK_AHEAD_HORIZON = 15
-    # --- END of Functional Additions for Milestone 2 ---
 
     def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0):
         super().__init__(model)
@@ -35,10 +30,10 @@ class Trader(CellAgent):
         self.sugar = sugar
         self.metabolism_sugar = metabolism_sugar
         self.vision = vision
-        # --- START of Functional Additions for Milestone 2 ---
+        
+        # Investment-related attributes
         self.is_investing = False
         self.investment_counter = 0
-        # --- END of Functional Additions for Milestone 2 ---
 
     def calculate_welfare(self, sugar):
         """
@@ -53,7 +48,6 @@ class Trader(CellAgent):
         """
         return self.sugar <= 0
 
-    # --- START of Functional Additions for Milestone 2 ---
     def get_max_harvestable_sugar(self):
         """Helper to perceive the best foraging spot in the current vision."""
         empty_cells = [
@@ -69,6 +63,7 @@ class Trader(CellAgent):
         """Simulates future sugar if agent only forages."""
         sim_sugar = self.sugar
         expected_harvest = self.get_max_harvestable_sugar()
+
         for _ in range(horizon):
             sim_sugar += expected_harvest
             sim_sugar -= self.metabolism_sugar
@@ -78,58 +73,77 @@ class Trader(CellAgent):
 
     def simulate_invest_scenario(self, horizon):
         """Simulates future sugar if agent invests then forages."""
-        if self.sugar < self.INVESTMENT_COST:
-            return -1, True
+        # --- START of Functional Change ---
+        # Use model-level parameters
+        if (not self.model.enable_investment) or (self.sugar < self.model.investment_cost):
+            return -1, True # Cannot afford or feature disabled, scenario is invalid
         
-        sim_sugar = self.sugar - self.INVESTMENT_COST
+        sim_sugar = self.sugar - self.model.investment_cost
         expected_harvest = self.get_max_harvestable_sugar()
         current_sim_metabolism = self.metabolism_sugar
         
         for i in range(horizon):
-            if i < self.INVESTMENT_DURATION:
-                pass
+            # Investment phase
+            if i < self.model.investment_duration:
+                pass  # No harvesting during investment
+            # Post-investment phase
             else:
-                if i == self.INVESTMENT_DURATION:
-                    current_sim_metabolism *= self.METABOLISM_REDUCTION_FACTOR
+                # Benefit kicks in after investment is complete
+                if i == self.model.investment_duration:
+                    current_sim_metabolism *= self.model.metabolism_reduction_factor
                 sim_sugar += expected_harvest
             
             sim_sugar -= current_sim_metabolism
             if sim_sugar < 0:
-                return -1, True
+                return -1, True # Agent died during simulation
 
         return sim_sugar, False
+        # --- END of Functional Change ---
 
     def step(self):
         """Main step logic for the agent."""
+        # --- Handle ongoing investment first ---
         if self.is_investing:
             self.investment_counter -= 1
             if self.investment_counter <= 0:
-                self.metabolism_sugar *= self.METABOLISM_REDUCTION_FACTOR
+                # --- START of Functional Change ---
+                self.metabolism_sugar *= self.model.metabolism_reduction_factor
+                # --- END of Functional Change ---
                 self.is_investing = False
+        
         else:
-            forage_utility, forage_death = self.simulate_forage_scenario(self.LOOK_AHEAD_HORIZON)
-            invest_utility, invest_death = self.simulate_invest_scenario(self.LOOK_AHEAD_HORIZON)
+            # --- Step 1: Deliberate between Foraging and Investing ---
+            # --- START of Functional Change ---
+            horizon = self.model.agent_look_ahead_horizon
+            forage_utility, forage_death = self.simulate_forage_scenario(horizon)
+            invest_utility, invest_death = self.simulate_invest_scenario(horizon)
+            # --- END of Functional Change ---
 
             chosen_action = "FORAGE"
+            # Survival first
             if forage_death and not invest_death:
                 chosen_action = "INVEST"
             elif not forage_death and invest_death:
                 chosen_action = "FORAGE"
+            # If both survive, maximize sugar
             elif not forage_death and not invest_death:
                 if invest_utility > forage_utility:
                     chosen_action = "INVEST"
             
+            # --- Step 2: Execute chosen action ---
             if chosen_action == "INVEST":
-                self.sugar -= self.INVESTMENT_COST
+                # --- START of Functional Change ---
+                self.sugar -= self.model.investment_cost
                 self.is_investing = True
-                self.investment_counter = self.INVESTMENT_DURATION
+                self.investment_counter = self.model.investment_duration
+                # --- END of Functional Change ---
             else: # FORAGE
                 self.move()
                 self.eat()
 
+        # --- Step 3: Metabolize and possibly die ---
         self.metabolize()
         self.maybe_die()
-    # --- END of Functional Additions for Milestone 2 ---
 
     def move(self):
         """
@@ -154,7 +168,6 @@ class Trader(CellAgent):
 
         # 3. Find the closest best option
         if not welfares:
-            # No empty cells to move to, stay put.
             return
 
         max_welfare = max(welfares)
@@ -163,10 +176,8 @@ class Trader(CellAgent):
         ]
         candidates = [neighboring_cells[i] for i in candidate_indices]
 
-        # Find the minimum distance among the best candidates
         min_dist = min(get_distance(self.cell, cell) for cell in candidates)
 
-        # Get all candidates that are at the minimum distance
         final_candidates = [
             cell
             for cell in candidates
@@ -178,20 +189,14 @@ class Trader(CellAgent):
 
     def eat(self):
         """
-        Agent harvests sugar from its current cell and metabolizes some sugar.
+        Agent harvests sugar from its current cell.
         """
         self.sugar += self.cell.sugar
         self.cell.sugar = 0
-        # --- START of Functional Change for Milestone 2 ---
-        # Metabolism is now handled separately in the step method
-        # self.sugar -= self.metabolism_sugar
-        # --- END of Functional Change for Milestone 2 ---
 
-    # --- START of Functional Additions for Milestone 2 ---
     def metabolize(self):
         """Agent consumes sugar for metabolism."""
         self.sugar -= self.metabolism_sugar
-    # --- END of Functional Additions for Milestone 2 ---
         
     def maybe_die(self):
         """
