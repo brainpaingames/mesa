@@ -41,40 +41,45 @@ class SugarscapeG1mt(mesa.Model):
         run_group="default",
         description="A simulation run.",
         log_agent_data=False,
+        dev_mode=False,
         seed=None,
     ):
         super().__init__(seed=seed)
         
-        git_hash, is_dirty = self._get_git_info()
-        if is_dirty:
-            raise RuntimeError(
-                "Git repository has uncommitted changes. "
-                "Please commit your changes before running a logged simulation."
-            )
-        
-        run_meta = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "git_hash": git_hash,
-            "run_group": run_group,
-            "description": description,
-        }
-        
-        model_params = {
-            "width": width, "height": height,
-            "initial_population": initial_population,
-            "endowment_min": endowment_min, "endowment_max": endowment_max,
-            "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
-            "vision_min": vision_min, "vision_max": vision_max,
-            "enable_investment": int(enable_investment),
-            "investment_cost": investment_cost,
-            "investment_duration": investment_duration,
-            "metabolism_reduction_factor": metabolism_reduction_factor,
-            "agent_look_ahead_horizon": agent_look_ahead_horizon,
-            "log_agent_data": int(log_agent_data),
-        }
-        
-        self.db_logger = DatabaseLogger()
-        self.run_id = self.db_logger.create_new_run(run_meta, model_params)
+        self.dev_mode = dev_mode
+        self.db_logger = None
+
+        if not self.dev_mode:
+            git_hash, is_dirty = self._get_git_info()
+            if is_dirty:
+                raise RuntimeError(
+                    "Git repository has uncommitted changes. "
+                    "Please commit your changes before running a logged simulation."
+                )
+            
+            run_meta = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "git_hash": git_hash,
+                "run_group": run_group,
+                "description": description,
+            }
+            
+            model_params = {
+                "width": width, "height": height,
+                "initial_population": initial_population,
+                "endowment_min": endowment_min, "endowment_max": endowment_max,
+                "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
+                "vision_min": vision_min, "vision_max": vision_max,
+                "enable_investment": int(enable_investment),
+                "investment_cost": investment_cost,
+                "investment_duration": investment_duration,
+                "metabolism_reduction_factor": metabolism_reduction_factor,
+                "agent_look_ahead_horizon": agent_look_ahead_horizon,
+                "log_agent_data": int(log_agent_data),
+            }
+            
+            self.db_logger = DatabaseLogger()
+            self.run_id = self.db_logger.create_new_run(run_meta, model_params)
 
         self.width = width
         self.height = height
@@ -124,28 +129,26 @@ class SugarscapeG1mt(mesa.Model):
     def step(self):
         """
         A unique step function that does staged activation.
-        First, the sugar grows back, then agents act.
         """
         self.grid.sugar.data = np.minimum(
             self.grid.sugar.data + 1, self.sugar_distribution
         )
 
-        # To account for agent death and removal, we need a separate data structure to
-        # iterate over.
         trader_shuffle = self.agents_by_type[Trader].shuffle()
         for agent in trader_shuffle:
             agent.step()
 
         self.datacollector.collect(self)
         
-        latest_data = {
-            reporter: values[-1]
-            for reporter, values in self.datacollector.model_vars.items()
-        }
-        self.db_logger.log_model_step(self.run_id, self.steps, latest_data)
+        if self.db_logger is not None:
+            latest_data = {
+                reporter: values[-1]
+                for reporter, values in self.datacollector.model_vars.items()
+            }
+            self.db_logger.log_model_step(self.run_id, self.steps, latest_data)
 
-        if self.log_agent_data:
-            self.db_logger.log_agent_data(self.run_id, self.steps, self.schedule.agents)
+            if self.log_agent_data:
+                self.db_logger.log_agent_data(self.run_id, self.steps, self.schedule.agents)
 
     def run_model(self, step_count=1000):
         for _ in range(step_count):

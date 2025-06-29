@@ -1,8 +1,11 @@
+import sys
 from model import SugarscapeG1mt
 from mesa.visualization import Slider, SolaraViz, make_plot_component
 from mesa.visualization.components import AgentPortrayalStyle, PropertyLayerStyle
 from mesa.visualization.components.matplotlib_components import make_mpl_space_component
 
+# Check for our custom flag after the '--' separator.
+IS_DEV_MODE = "--mesa-dev" in sys.argv
 
 def agent_portrayal(agent):
     """
@@ -30,8 +33,6 @@ def agent_portrayal(agent):
 def propertylayer_portrayal(layer):
     """
     Defines how to draw the property layer (sugar) on the grid.
-    This function must return a PropertyLayerStyle object. The visualization
-    engine will use the single 'color' provided and vary its intensity.
     """
     return PropertyLayerStyle(
         color="green",
@@ -55,8 +56,8 @@ model_params = {
     },
     "width": 50,
     "height": 50,
-    "run_group": {"type": "InputText", "value": "gui_test_run", "label": "Run Group/Experiment Name"},
-    "description": {"type": "InputText", "value": "A test run from the GUI.", "label": "Run Description"},
+    "run_group": {"type": "InputText", "value": "dev_run", "label": "Run Group/Experiment Name"},
+    "description": {"type": "InputText", "value": "A developer run.", "label": "Run Description"},
     "log_agent_data": {"type": "Checkbox", "value": False, "label": "Log Agent-Level Data (creates large DB)"},
     "initial_population": Slider(
         "Initial Population", value=200, min=50, max=500, step=10
@@ -74,7 +75,11 @@ model_params = {
     "agent_look_ahead_horizon": Slider("Agent Planning Horizon", value=15, min=5, max=50, step=1),
 }
 
-model = SugarscapeG1mt()
+model = SugarscapeG1mt(dev_mode=IS_DEV_MODE)
+
+page_name = "Sugarscape with Investment"
+if IS_DEV_MODE:
+    page_name = "DEV MODE - " + page_name
 
 page = SolaraViz(
     model,
@@ -86,7 +91,7 @@ page = SolaraViz(
         make_plot_component("Average Metabolism"),
     ],
     model_params=model_params,
-    name="Sugarscape with Investment",
+    name=page_name,
     play_interval=150,
 )
 page
