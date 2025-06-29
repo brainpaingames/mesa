@@ -150,7 +150,10 @@ class SugarscapeG1mt(mesa.Model):
         # Collect model level data
         self.datacollector.collect(self)
         
-        latest_data = self.datacollector._model_records[-1]
+        latest_data = {
+            reporter: values[-1]
+            for reporter, values in self.datacollector.model_vars.items()
+        }
         self.db_logger.log_model_step(self.run_id, self.steps, latest_data)
 
         if self.log_agent_data:
