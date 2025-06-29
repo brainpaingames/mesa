@@ -6,12 +6,24 @@ import mesa
 from mesa.discrete_space import OrthogonalVonNeumannGrid
 from mesa.discrete_space.property_layer import PropertyLayer
 from agents import Trader
+import subprocess
+import datetime
+from database_logger import DatabaseLogger
 
 
 class SugarscapeG1mt(mesa.Model):
     """
     A manager class to run a Sugarscape where agents can invest.
     """
+    def _get_git_info(self):
+        """Helper function to get git hash and check for uncommitted changes."""
+        try:
+            git_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD']).strip().decode('utf-8')
+            git_status = subprocess.check_output(['git', 'status', '--porcelain']).strip().decode('utf-8')
+            is_dirty = bool(git_status)
+            return git_hash, is_dirty
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return "not a git repo", False
 
     def __init__(
         self,
@@ -24,28 +36,60 @@ class SugarscapeG1mt(mesa.Model):
         metabolism_max=5,
         vision_min=1,
         vision_max=5,
-        # --- START of Functional Additions ---
         enable_investment=True,
         investment_cost=10,
         investment_duration=5,
         metabolism_reduction_factor=0.8,
         agent_look_ahead_horizon=15,
-        # --- END of Functional Additions ---
+        run_group="default",
+        description="A simulation run.",
+        log_agent_data=False,
         seed=None,
     ):
         super().__init__(seed=seed)
+        
+        git_hash, is_dirty = self._get_git_info()
+        if is_dirty:
+            raise RuntimeError(
+                "Git repository has uncommitted changes. "
+                "Please commit your changes before running a logged simulation."
+            )
+        
+        run_meta = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "git_hash": git_hash,
+            "run_group": run_group,
+            "description": description,
+        }
+        
+        model_params = {
+            "width": width, "height": height,
+            "initial_population": initial_population,
+            "endowment_min": endowment_min, "endowment_max": endowment_max,
+            "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
+            "vision_min": vision_min, "vision_max": vision_max,
+            "enable_investment": int(enable_investment),
+            "investment_cost": investment_cost,
+            "investment_duration": investment_duration,
+            "metabolism_reduction_factor": metabolism_reduction_factor,
+            "agent_look_ahead_horizon": agent_look_ahead_horizon,
+            "log_agent_data": int(log_agent_data),
+        }
+        
+        self.db_logger = DatabaseLogger()
+        self.run_id = self.db_logger.create_new_run(run_meta, model_params)
+
         # Initiate width and height of sugarscape
         self.width = width
         self.height = height
 
-        # --- START of Functional Additions ---
         # Store model parameters
         self.enable_investment = enable_investment
         self.investment_cost = investment_cost
         self.investment_duration = investment_duration
         self.metabolism_reduction_factor = metabolism_reduction_factor
         self.agent_look_ahead_horizon = agent_look_ahead_horizon
-        # --- END of Functional Additions ---
+        self.log_agent_data = log_agent_data
 
         # Initiate population attributes
         self.running = True
@@ -105,6 +149,12 @@ class SugarscapeG1mt(mesa.Model):
 
         # Collect model level data
         self.datacollector.collect(self)
+        
+        latest_data = self.datacollector.model_vars[self.steps]
+        self.db_logger.log_model_step(self.run_id, self.steps, latest_data)
+
+        if self.log_agent_data:
+            self.db_logger.log_agent_data(self.run_id, self.steps, self.schedule.agents)
 
     def run_model(self, step_count=1000):
         for _ in range(step_count):

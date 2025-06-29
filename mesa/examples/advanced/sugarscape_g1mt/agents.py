@@ -35,6 +35,17 @@ class Trader(CellAgent):
         self.is_investing = False
         self.investment_counter = 0
 
+    def get_reportable_attributes(self):
+        """Returns a dictionary of agent attributes for database logging."""
+        return {
+            "pos_x": self.pos[0],
+            "pos_y": self.pos[1],
+            "sugar": self.sugar,
+            "metabolism": self.metabolism_sugar,
+            "vision": self.vision,
+            "is_investing": int(self.is_investing),
+        }
+
     def calculate_welfare(self, sugar):
         """
         Helper function for self.move().
@@ -73,7 +84,6 @@ class Trader(CellAgent):
 
     def simulate_invest_scenario(self, horizon):
         """Simulates future sugar if agent invests then forages."""
-        # --- START of Functional Change ---
         # Use model-level parameters
         if (not self.model.enable_investment) or (self.sugar < self.model.investment_cost):
             return -1, True # Cannot afford or feature disabled, scenario is invalid
@@ -98,26 +108,21 @@ class Trader(CellAgent):
                 return -1, True # Agent died during simulation
 
         return sim_sugar, False
-        # --- END of Functional Change ---
 
     def step(self):
         """Main step logic for the agent."""
-        # --- Handle ongoing investment first ---
+        # Handle ongoing investment first
         if self.is_investing:
             self.investment_counter -= 1
             if self.investment_counter <= 0:
-                # --- START of Functional Change ---
                 self.metabolism_sugar *= self.model.metabolism_reduction_factor
-                # --- END of Functional Change ---
                 self.is_investing = False
         
         else:
-            # --- Step 1: Deliberate between Foraging and Investing ---
-            # --- START of Functional Change ---
+            # Step 1: Deliberate between Foraging and Investing
             horizon = self.model.agent_look_ahead_horizon
             forage_utility, forage_death = self.simulate_forage_scenario(horizon)
             invest_utility, invest_death = self.simulate_invest_scenario(horizon)
-            # --- END of Functional Change ---
 
             chosen_action = "FORAGE"
             # Survival first
@@ -130,18 +135,16 @@ class Trader(CellAgent):
                 if invest_utility > forage_utility:
                     chosen_action = "INVEST"
             
-            # --- Step 2: Execute chosen action ---
+            # Step 2: Execute chosen action
             if chosen_action == "INVEST":
-                # --- START of Functional Change ---
                 self.sugar -= self.model.investment_cost
                 self.is_investing = True
                 self.investment_counter = self.model.investment_duration
-                # --- END of Functional Change ---
             else: # FORAGE
                 self.move()
                 self.eat()
 
-        # --- Step 3: Metabolize and possibly die ---
+        # Step 3: Metabolize and possibly die
         self.metabolize()
         self.maybe_die()
 

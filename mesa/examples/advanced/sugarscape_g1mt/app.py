@@ -58,6 +58,9 @@ model_params = {
     },
     "width": 50,
     "height": 50,
+    "run_group": {"type": "InputText", "value": "gui_test_run", "label": "Run Group/Experiment Name"},
+    "description": {"type": "InputText", "value": "A test run from the GUI.", "label": "Run Description"},
+    "log_agent_data": {"type": "Checkbox", "value": False, "label": "Log Agent-Level Data (creates large DB)"},
     # Population parameters
     "initial_population": Slider(
         "Initial Population", value=200, min=50, max=500, step=10
@@ -71,14 +74,12 @@ model_params = {
     # Vision parameters
     "vision_min": Slider("Min Vision", value=1, min=1, max=3, step=1),
     "vision_max": Slider("Max Vision", value=5, min=3, max=8, step=1),
-    # --- START of Functional Additions ---
     # Investment parameters
     "enable_investment": {"type": "Checkbox", "value": True, "label": "Enable Investment"},
     "investment_cost": Slider("Investment Cost", value=10, min=0, max=50, step=1),
     "investment_duration": Slider("Investment Duration", value=5, min=1, max=20, step=1),
     "metabolism_reduction_factor": Slider("Metabolism Reduction Factor", value=0.8, min=0.1, max=1.0, step=0.05),
     "agent_look_ahead_horizon": Slider("Agent Planning Horizon", value=15, min=5, max=50, step=1),
-    # --- END of Functional Additions ---
 }
 
 # The model class is imported from model.py
