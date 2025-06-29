@@ -8,6 +8,18 @@ import subprocess
 import datetime
 from database_logger import DatabaseLogger
 
+def Gini(model):
+    """Helper to calculate the Gini coefficient for agent wealth."""
+    agent_wealths = [agent.sugar for agent in model.schedule.agents]
+    if len(agent_wealths) < 2:
+        return 0
+    # Formula from https://en.wikipedia.org/wiki/Gini_coefficient
+    x = np.sort(agent_wealths)
+    n = len(x)
+    cumx = np.cumsum(x, dtype=float)
+    # The Gini coefficient is the area between the Lorenz curve and the line of equality
+    return (n + 1 - 2 * np.sum(cumx) / cumx[-1]) / n
+
 class SugarscapeG1mt(mesa.Model):
     """
     A manager class to run a Sugarscape where agents can invest.
@@ -103,6 +115,7 @@ class SugarscapeG1mt(mesa.Model):
                 "Total Sugar": lambda m: sum(a.sugar for a in m.agents),
                 "Investing Agents": lambda m: len([a for a in m.agents if a.is_investing]),
                 "Average Metabolism": lambda m: np.mean([a.metabolism_sugar for a in m.agents]) if m.agents else 0,
+                "Gini": Gini,
             },
         )
 
