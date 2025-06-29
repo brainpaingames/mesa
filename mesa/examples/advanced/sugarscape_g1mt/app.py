@@ -89,6 +89,7 @@ page = SolaraViz(
         make_plot_component("Total Sugar"),
         make_plot_component("Investing Agents"),
         make_plot_component("Average Metabolism"),
+        make_plot_component("Gini"), 
     ],
     model_params=model_params,
     name=page_name,
