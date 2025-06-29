@@ -3,7 +3,6 @@ import math
 from mesa.discrete_space import CellAgent
 
 
-# Helper function
 def get_distance(cell_1, cell_2):
     """
     Calculate the Euclidean distance between two positions.
@@ -30,8 +29,6 @@ class Trader(CellAgent):
         self.sugar = sugar
         self.metabolism_sugar = metabolism_sugar
         self.vision = vision
-        
-        # Investment-related attributes
         self.is_investing = False
         self.investment_counter = 0
 
@@ -79,12 +76,11 @@ class Trader(CellAgent):
             sim_sugar += expected_harvest
             sim_sugar -= self.metabolism_sugar
             if sim_sugar < 0:
-                return -1, True  # Return final sugar and death status
+                return -1, True
         return sim_sugar, False
 
     def simulate_invest_scenario(self, horizon):
         """Simulates future sugar if agent invests then forages."""
-        # Use model-level parameters
         if (not self.model.enable_investment) or (self.sugar < self.model.investment_cost):
             return -1, True # Cannot afford or feature disabled, scenario is invalid
         
@@ -93,25 +89,21 @@ class Trader(CellAgent):
         current_sim_metabolism = self.metabolism_sugar
         
         for i in range(horizon):
-            # Investment phase
             if i < self.model.investment_duration:
-                pass  # No harvesting during investment
-            # Post-investment phase
+                pass
             else:
-                # Benefit kicks in after investment is complete
                 if i == self.model.investment_duration:
                     current_sim_metabolism *= self.model.metabolism_reduction_factor
                 sim_sugar += expected_harvest
             
             sim_sugar -= current_sim_metabolism
             if sim_sugar < 0:
-                return -1, True # Agent died during simulation
+                return -1, True
 
         return sim_sugar, False
 
     def step(self):
         """Main step logic for the agent."""
-        # Handle ongoing investment first
         if self.is_investing:
             self.investment_counter -= 1
             if self.investment_counter <= 0:
@@ -119,32 +111,27 @@ class Trader(CellAgent):
                 self.is_investing = False
         
         else:
-            # Step 1: Deliberate between Foraging and Investing
             horizon = self.model.agent_look_ahead_horizon
             forage_utility, forage_death = self.simulate_forage_scenario(horizon)
             invest_utility, invest_death = self.simulate_invest_scenario(horizon)
 
             chosen_action = "FORAGE"
-            # Survival first
             if forage_death and not invest_death:
                 chosen_action = "INVEST"
             elif not forage_death and invest_death:
                 chosen_action = "FORAGE"
-            # If both survive, maximize sugar
             elif not forage_death and not invest_death:
                 if invest_utility > forage_utility:
                     chosen_action = "INVEST"
             
-            # Step 2: Execute chosen action
             if chosen_action == "INVEST":
                 self.sugar -= self.model.investment_cost
                 self.is_investing = True
                 self.investment_counter = self.model.investment_duration
-            else: # FORAGE
+            else:
                 self.move()
                 self.eat()
 
-        # Step 3: Metabolize and possibly die
         self.metabolize()
         self.maybe_die()
 
@@ -156,20 +143,17 @@ class Trader(CellAgent):
         3. Find the closest of the best options.
         4. Move to the chosen cell.
         """
-        # 1. Identify all possible moves (empty cells)
         neighboring_cells = [
             cell
             for cell in self.cell.get_neighborhood(self.vision, include_center=True)
             if cell.is_empty
         ]
 
-        # 2. Determine which move maximizes welfare (total sugar after moving)
         welfares = [
             self.calculate_welfare(self.sugar + cell.sugar)
             for cell in neighboring_cells
         ]
 
-        # 3. Find the closest best option
         if not welfares:
             return
 
@@ -187,7 +171,6 @@ class Trader(CellAgent):
             if math.isclose(get_distance(self.cell, cell), min_dist, rel_tol=1e-2)
         ]
 
-        # 4. Move Agent
         self.cell = self.random.choice(final_candidates)
 
     def eat(self):

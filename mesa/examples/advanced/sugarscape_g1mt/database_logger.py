@@ -10,8 +10,6 @@ class DatabaseLogger:
 
     def __init__(self, db_path="simulation_results.db"):
         self.db_path = db_path
-        # We no longer connect in the constructor.
-        # We only create the tables if they don't exist.
         self._create_tables()
 
     def _get_connection(self):
@@ -99,5 +97,5 @@ class DatabaseLogger:
     def close(self):
         # This method is no longer strictly necessary, as we don't hold a
         # persistent connection, but it's good practice to leave it in case
-        # we change the connection strategy later.
+        # the connection strategy changes later.
         pass

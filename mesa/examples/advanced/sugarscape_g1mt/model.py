@@ -1,7 +1,5 @@
 from pathlib import Path
-
 import numpy as np
-
 import mesa
 from mesa.discrete_space import OrthogonalVonNeumannGrid
 from mesa.discrete_space.property_layer import PropertyLayer
@@ -9,7 +7,6 @@ from agents import Trader
 import subprocess
 import datetime
 from database_logger import DatabaseLogger
-
 
 class SugarscapeG1mt(mesa.Model):
     """
@@ -79,11 +76,9 @@ class SugarscapeG1mt(mesa.Model):
         self.db_logger = DatabaseLogger()
         self.run_id = self.db_logger.create_new_run(run_meta, model_params)
 
-        # Initiate width and height of sugarscape
         self.width = width
         self.height = height
 
-        # Store model parameters
         self.enable_investment = enable_investment
         self.investment_cost = investment_cost
         self.investment_duration = investment_duration
@@ -91,15 +86,12 @@ class SugarscapeG1mt(mesa.Model):
         self.agent_look_ahead_horizon = agent_look_ahead_horizon
         self.log_agent_data = log_agent_data
 
-        # Initiate population attributes
         self.running = True
 
-        # Initiate mesa grid class
         self.grid = OrthogonalVonNeumannGrid(
             (self.width, self.height), torus=False, random=self.random
         )
         
-        # Updated DataCollector for new metrics
         self.datacollector = mesa.DataCollector(
             model_reporters={
                 "#Traders": lambda m: len(m.agents),
@@ -114,7 +106,6 @@ class SugarscapeG1mt(mesa.Model):
             PropertyLayer.from_data("sugar", self.sugar_distribution)
         )
 
-        # Create agents
         Trader.create_agents(
             self,
             initial_population,
@@ -135,19 +126,16 @@ class SugarscapeG1mt(mesa.Model):
         A unique step function that does staged activation.
         First, the sugar grows back, then agents act.
         """
-        # Grow sugar
         self.grid.sugar.data = np.minimum(
             self.grid.sugar.data + 1, self.sugar_distribution
         )
 
-        # Step trader agents
         # To account for agent death and removal, we need a separate data structure to
         # iterate over.
         trader_shuffle = self.agents_by_type[Trader].shuffle()
         for agent in trader_shuffle:
             agent.step()
 
-        # Collect model level data
         self.datacollector.collect(self)
         
         latest_data = {
