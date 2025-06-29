@@ -10,7 +10,7 @@ from database_logger import DatabaseLogger
 
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""
-    agent_wealths = [agent.sugar for agent in model.schedule.agents]
+    agent_wealths = [agent.sugar for agent in model.agents_by_type[Trader]]
     if len(agent_wealths) < 2:
         return 0
     # Formula from https://en.wikipedia.org/wiki/Gini_coefficient
