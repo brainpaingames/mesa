@@ -62,6 +62,7 @@ model_params = {
     "initial_population": Slider(
         "Initial Population", value=200, min=50, max=500, step=10
     ),
+    "agent_re_spawn": {"type": "Checkbox", "value": True, "label": "Re-spawn Dead Agents"},
     "endowment_min": Slider("Min Initial Endowment", value=25, min=5, max=30, step=1),
     "endowment_max": Slider("Max Initial Endowment", value=50, min=30, max=100, step=1),
     "metabolism_min": Slider("Min Metabolism", value=1, min=1, max=3, step=1),

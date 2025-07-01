@@ -39,6 +39,7 @@ class SugarscapeG1mt(mesa.Model):
         width=50,
         height=50,
         initial_population=200,
+        agent_re_spawn=True,
         endowment_min=25,
         endowment_max=50,
         metabolism_min=1,
@@ -79,6 +80,7 @@ class SugarscapeG1mt(mesa.Model):
             model_params = {
                 "width": width, "height": height,
                 "initial_population": initial_population,
+                "agent_re_spawn": int(agent_re_spawn),
                 "endowment_min": endowment_min, "endowment_max": endowment_max,
                 "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
                 "vision_min": vision_min, "vision_max": vision_max,
@@ -96,6 +98,7 @@ class SugarscapeG1mt(mesa.Model):
         self.width = width
         self.height = height
         self.initial_population = initial_population
+        self.agent_re_spawn = agent_re_spawn
         self.endowment_min = endowment_min
         self.endowment_max = endowment_max
         self.metabolism_min = metabolism_min
@@ -179,14 +182,16 @@ class SugarscapeG1mt(mesa.Model):
             self.grid.sugar.data + 1, self.sugar_distribution
         )
 
+        self.deaths_this_step = 0
         trader_shuffle = self.agents_by_type[Trader].shuffle()
         for agent in trader_shuffle:
             agent.step()
         
-        current_population = len(self.agents)
-        self.deaths_this_step = self.initial_population - current_population
-        for _ in range(self.deaths_this_step):
-            self._add_new_agent()
+        if self.agent_re_spawn:
+            current_population = len(self.agents)
+            self.deaths_this_step = self.initial_population - current_population
+            for _ in range(self.deaths_this_step):
+                self._add_new_agent()
 
         self.datacollector.collect(self)
         
