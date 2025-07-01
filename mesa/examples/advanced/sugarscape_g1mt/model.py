@@ -95,6 +95,13 @@ class SugarscapeG1mt(mesa.Model):
 
         self.width = width
         self.height = height
+        self.initial_population = initial_population
+        self.endowment_min = endowment_min
+        self.endowment_max = endowment_max
+        self.metabolism_min = metabolism_min
+        self.metabolism_max = metabolism_max
+        self.vision_min = vision_min
+        self.vision_max = vision_max
 
         self.enable_investment = enable_investment
         self.investment_cost = investment_cost
@@ -116,6 +123,7 @@ class SugarscapeG1mt(mesa.Model):
                 "Investing Agents": lambda m: len([a for a in m.agents if a.is_investing]),
                 "Average Metabolism": lambda m: np.mean([a.metabolism_sugar for a in m.agents]) if m.agents else 0,
                 "Gini": Gini,
+                "Deaths": lambda m: getattr(m, 'deaths_this_step', 0),
             },
         )
 
@@ -126,16 +134,40 @@ class SugarscapeG1mt(mesa.Model):
 
         Trader.create_agents(
             self,
-            initial_population,
-            self.random.choices(self.grid.all_cells.cells, k=initial_population),
+            self.initial_population,
+            self.random.choices(self.grid.all_cells.cells, k=self.initial_population),
             sugar=self.rng.integers(
-                endowment_min, endowment_max, (initial_population,), endpoint=True
+                self.endowment_min, self.endowment_max, (self.initial_population,), endpoint=True
             ),
             metabolism_sugar=self.rng.integers(
-                metabolism_min, metabolism_max, (initial_population,), endpoint=True
+                self.metabolism_min, self.metabolism_max, (self.initial_population,), endpoint=True
             ),
             vision=self.rng.integers(
-                vision_min, vision_max, (initial_population,), endpoint=True
+                self.vision_min, self.vision_max, (self.initial_population,), endpoint=True
+            ),
+        )
+
+    def _add_new_agent(self):
+        """Helper method to add a single new agent to the model."""
+        
+        empty_cells = [cell for cell in self.grid.all_cells.cells if cell.is_empty]
+        if not empty_cells:
+            return
+
+        new_cell = self.random.choice(empty_cells)
+        
+        Trader.create_agents(
+            self,
+            1,
+            [new_cell],
+            sugar=self.rng.integers(
+                self.endowment_min, self.endowment_max, endpoint=True
+            ),
+            metabolism_sugar=self.rng.integers(
+                self.metabolism_min, self.metabolism_max, endpoint=True
+            ),
+            vision=self.rng.integers(
+                self.vision_min, self.vision_max, endpoint=True
             ),
         )
 
@@ -150,6 +182,11 @@ class SugarscapeG1mt(mesa.Model):
         trader_shuffle = self.agents_by_type[Trader].shuffle()
         for agent in trader_shuffle:
             agent.step()
+        
+        current_population = len(self.agents)
+        self.deaths_this_step = self.initial_population - current_population
+        for _ in range(self.deaths_this_step):
+            self._add_new_agent()
 
         self.datacollector.collect(self)
         
