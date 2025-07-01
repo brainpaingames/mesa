@@ -143,7 +143,7 @@ class SugarscapeG1mt(mesa.Model):
                 self.endowment_min, self.endowment_max, (self.initial_population,), endpoint=True
             ),
             metabolism_sugar=self.rng.integers(
-                self.metabolism_min, self.metabolism_max, (self.initial_population,), endpoint=True
+                self.metabolism_min, self.metabolism_max, (self.initial_population,), endpoint=True  # noqa: E501
             ),
             vision=self.rng.integers(
                 self.vision_min, self.vision_max, (self.initial_population,), endpoint=True
@@ -178,9 +178,16 @@ class SugarscapeG1mt(mesa.Model):
         """
         A unique step function that does staged activation.
         """
-        self.grid.sugar.data = np.minimum(
-            self.grid.sugar.data + 1, self.sugar_distribution
-        )
+        # Create a boolean mask of all occupied cells
+        occupied_mask = np.zeros_like(self.grid.sugar.data, dtype=bool)
+        for agent in self.agents_by_type[Trader]:
+            if agent.pos:
+                occupied_mask[agent.pos[1], agent.pos[0]] = True
+        
+        # Regrow sugar only on unoccupied cells
+        regrowth_sugar = self.grid.sugar.data.copy()
+        regrowth_sugar[~occupied_mask] += 1
+        self.grid.sugar.data = np.minimum(regrowth_sugar, self.sugar_distribution)
 
         self.deaths_this_step = 0
         trader_shuffle = self.agents_by_type[Trader].shuffle()
