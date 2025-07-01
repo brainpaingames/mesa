@@ -76,6 +76,9 @@ model_params = {
     "agent_look_ahead_horizon": Slider("Agent Planning Horizon", value=15, min=5, max=50, step=1),
 }
 
+if IS_DEV_MODE:
+    model_params["dev_mode"] = True
+
 model = SugarscapeG1mt(dev_mode=IS_DEV_MODE)
 
 page_name = "Sugarscape with Investment"
