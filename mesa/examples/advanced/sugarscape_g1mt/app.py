@@ -70,6 +70,8 @@ model_params = {
     "metabolism_max": Slider("Max Metabolism", value=4.0, min=0.0, max=5.0, step=0.1),
     "vision_min": Slider("Min Vision", value=1, min=0, max=10, step=1),
     "vision_max": Slider("Max Vision", value=6, min=0, max=10, step=1),
+    "agent_age_min": Slider("Min Agent Age", value=60, min=0, max=150, step=5),
+    "agent_age_max": Slider("Max Agent Age", value=60, min=0, max=150, step=5),
     "enable_investment": {"type": "Checkbox", "value": False, "label": "Enable Investment"},
     "investment_cost": Slider("Investment Cost", value=10, min=0, max=50, step=1),
     "investment_duration": Slider("Investment Duration", value=5, min=1, max=20, step=1),
