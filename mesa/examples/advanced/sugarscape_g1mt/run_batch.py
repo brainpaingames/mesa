@@ -20,18 +20,18 @@ def run_batch():
     # --- 1. Define Default Parameters ---
     DEFAULT_PARAMS = {
         "width": 50, "height": 50,
-        "initial_population": 350,
-        "agent_re_spawn": True,
+        "initial_population": 400,
+        "agent_re_spawn": False,
         "sugar_regrowth_rate": 1.0,
-        "endowment": [6, 6],
-        "metabolism": [1, 5],
-        "vision": [1, 5],
+        "endowment": [15, 15],
+        "metabolism": [1, 4],
+        "vision": [1, 6],
         "enable_investment": False,
         "investment_cost": 30, "investment_duration": 2,
         "metabolism_reduction_factor": 0.5,
         "agent_look_ahead_horizon": 25,
         "log_agent_data": False,
-        "seed": 42, # <-- Add seed to the recognized parameters
+        "seed": 42,
     }
 
     # --- 2. Set up Argument Parser ---
@@ -39,6 +39,7 @@ def run_batch():
     parser.add_argument("--replications", type=int, default=1, help="Number of times to run each parameter combination.")
     parser.add_argument("--steps", type=int, default=1000, help="Number of steps to run each simulation for.")
     parser.add_argument("--run_group", type=str, default="CLI_Batch_Run", help="A group name for this entire batch of runs.")
+    parser.add_argument("--db", default="simulation_results.db", help="Path to the simulation results database.")
 
     for key, value in DEFAULT_PARAMS.items():
         parser.add_argument(f"--{key}", type=flexible_type, default=json.dumps(value),
@@ -64,7 +65,7 @@ def run_batch():
              final_fixed_params[key] = value
 
     # --- 4. Generate and Run Simulations ---
-    logger = DatabaseLogger(print_level=DatabaseLogger.INFO)
+    logger = DatabaseLogger(print_level=DatabaseLogger.INFO, db_path=args.db)
     
     if not param_space:
         param_combinations = [{}] 
@@ -99,13 +100,13 @@ def run_batch():
             description = ", ".join([f"{k}={v}" for k,v in combo_params.items()])
             # Handle the seed for replications
             if args.replications > 1:
-                run_params['seed'] = i
+                if 'seed' not in combo_params: # Don't override if seed is being swept
+                    run_params['seed'] = i
                 description = f"Rep {i+1}: {description}" if description else f"Rep {i+1}"
             
             # If seed is passed as a main arg, let it override replicator seed
             if 'seed' in cli_args and cli_args['seed'] is not None:
                 run_params['seed'] = cli_args['seed']
-                description = f"Seed {run_params['seed']}: {description}"
 
 
             run_meta = { "timestamp": datetime.datetime.now().isoformat(), "git_hash": git_hash,

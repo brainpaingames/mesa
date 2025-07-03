@@ -6,6 +6,9 @@ name = "pypi"
 [packages]
 mesa = {extras = ["rec"], file = ".", editable = true}
 pytest = "*"
+streamlit = "*"
+pandas = "*"
+plotly = "*"
 
 [dev-packages]
 

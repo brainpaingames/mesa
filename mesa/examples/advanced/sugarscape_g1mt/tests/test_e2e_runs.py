@@ -33,7 +33,8 @@ def test_book_baseline_run():
         "vision": "[1,6]",
         "endowment": "[5,25]",
         "sugar_regrowth_rate": "10",
-        "enable_investment": "false"
+        "enable_investment": "false",
+        "db": str(DB_PATH)
     }
 
     # --- 2. Execute the Simulation ---
@@ -50,11 +51,10 @@ def test_book_baseline_run():
     subprocess.run(command, check=True, cwd=working_dir)
 
     # --- 3. Connect to DB and Query Results ---
-    # The database will be created in the working_dir, so we must adjust the path
-    db_path_in_test = working_dir / "simulation_results.db"
-    assert os.path.exists(db_path_in_test), f"Database file not found at {db_path_in_test}"
+    # The database path is now correctly and consistently defined by DB_PATH
+    assert os.path.exists(DB_PATH), f"Database file not found at {DB_PATH}"
 
-    conn = sqlite3.connect(db_path_in_test)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     # Get the run_id for our unique test run
