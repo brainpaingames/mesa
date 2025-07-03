@@ -1,63 +1,117 @@
-# Sugarscape Constant Growback Model with Traders
+Of course. That's an excellent addition for clarity and ease of use. I will update the `README.md` to include the specific PowerShell syntax for setting the environment variable.
+
+Here is the revised `README.md` with the PowerShell commands included.
+
+---
+
+# Sugarscape with an Investment Mechanic
 
 ## Summary
 
-This is Epstein & Axtell's Sugarscape model with Traders, a detailed description is in Chapter four of
-*Growing Artificial Societies: Social Science from the Bottom Up (1996)*. The model shows an emergent price equilibrium can happen via a decentralized dynamics.
+This project is a heavily modified version of the Mesa Sugarscape example, designed to incrementally build a simulation of a financial economy. The original trading and spice mechanics have been removed. Instead, this model serves as a foundation for exploring how financial systems can emerge from simple agent-based rules.
 
-This code generally matches the code in the Complexity Explorer Tutorial, but in `.py` instead of `.ipynb` format.
+In its current state, the model features a single population of **Traders** who forage for sugar on a 2D landscape. The core economic choice for an agent is between **Foraging** for immediate survival and **Investing** a lump sum of their sugar for a long-term benefit—a permanent reduction in their metabolic rate.
 
-### Agents:
+Key features of this simulation framework include:
+-   **Look-ahead Decision-Making:** Agents use a short-term simulation to decide whether to forage or invest, picking the option that maximizes their wealth without leading to starvation.
+-   **Rigorous Database Logging:** All simulation runs are logged to a SQLite database (`simulation_results.db`), recording run metadata, parameters, and step-by-step aggregate and agent-level data.
+-   **Reproducibility:** In its default mode, the model requires a clean Git repository, ensuring all logged results are tied to a specific commit hash.
+-   **Developer Mode:** A `--mesa-dev` flag allows for rapid, iterative testing by bypassing all database logging and Git checks.
+-   **Batch Execution & Testing:** The project includes a powerful command-line script (`run_batch.py`) for running parameter sweeps and a `pytest` suite for automated end-to-end testing of the model's scientific output.
 
-- **Resource**:  Resource agents grow back at one unit of sugar and spice per time step up to a specified max amount and can be harvested and traded by the trader agents.
-  (if you do the interactive run, the color will be green if the resource agent has a bigger amount of sugar, or yellow if it has a bigger amount of spice)
-- **Traders**: Trader agents have the following attributes: (1) metabolism for sugar, (2) metabolism for spice, (3) vision,
-  (4) initial sugar endowment and (5) initial spice endowment. The traverse the landscape harvesting sugar and spice and
-trading with other agents. If they run out of sugar or spice then they are removed from the model. (red circle if you do the interactive run)
+## Agent: The `Trader`
 
-The trader agents traverse the landscape according to rule **M**:
-- Look out as far as vision permits in the four principal lattice directions and identify the unoccupied site(s).
-- Considering only unoccupied sites find the nearest position that produces the most welfare using the Cobb-Douglas function.
-- Move to the new position
-- Collect all the resources (sugar and spice) at that location
-(Epstein and Axtell, 1996, p. 99)
+The model consists of a single agent type, the `Trader`, which has the following attributes:
+-   A store of **sugar**, which is its wealth and lifeblood.
+-   A **metabolism**, which determines how much sugar it consumes each step.
+-   A **vision**, which determines how far it can see to find new sugar patches.
 
-The traders trade according to rule **T**:
-- Agents and potential trade partner compute their marginal rates of substitution (MRS), if they are equal *end*.
-- Exchange resources, with spice flowing from the agent with the higher MRS to the agent with the lower MRS and sugar
-flowing the opposite direction.
-- The price (p) is calculated by taking the geometric mean of the agents' MRS.
-- If p > 1 then p units of spice are traded for 1 unit of sugar; if p < 1 then 1/p units of sugar for 1 unit of spice
-- The trade occurs if it will (a) make both agent better off (increases MRS) and (b) does not cause the agents' MRS to
-cross over one another otherwise *end*.
-- This process then repeats until an *end* condition is met.
-(Epstein and Axtell, 1996, p. 105)
-
-The model demonstrates several Mesa concepts and features:
- - OrthogonalMooreGrid
- - Multiple agent types (traders, sugar, spice)
- - Dynamically removing agents from the grid and schedule when they die
- - Data Collection at the model and agent level
- - custom solara matplotlib space visualization
-
+Each turn, a `Trader` can perform one of two main actions:
+1.  **Forage:** Move to the best available empty cell within its vision and harvest all the sugar on that patch.
+2.  **Invest:** If it has sufficient sugar, it can pay a significant upfront cost and become inactive for a set duration. Upon completion, its metabolism is permanently reduced, making it more efficient for the rest of its life.
 
 ## How to Run
 
-To run the model interactively, in this directory, run the following command
+**Important:** All commands should be run from the parent directory (`.../mesa/examples/advanced/`).
 
-```
-    $ solara run app.py
-```
+### Interactive App (GUI)
 
-## Files
+The interactive app allows you to visualize the simulation and adjust parameters on the fly.
 
-* `model.py`: The Sugarscape Constant Growback with Traders model.
-* `agents.py`: Defines the Trader agent class and the Resource agent class which contains an amount of sugar and spice.
-* `app.py`: Runs a visualization server via Solara (`solara run app.py`).
-* `sugar_map.txt`: Provides sugar and spice landscape in raster type format.
-* `tests.py`: Has tests to ensure that the model reproduces the results in shown in Growing Artificial Societies.
+**1. Launch in Standard Mode:**
+
+*   **Windows (PowerShell):**
+    ```powershell
+    $env:PYTHONPATH='.'; solara run sugarscape_g1mt.app
+    ```
+*   **Windows (CMD):**
+    ```batch
+    set PYTHONPATH=. & solara run sugarscape_g1mt.app
+    ```
+*   **Linux / macOS:**
+    ```bash
+    PYTHONPATH=. solara run sugarscape_g1mt.app
+    ```
+
+**2. Launch in Developer Mode:**
+(Bypasses database logging and Git checks)
+
+*   **Windows (PowerShell):**
+    ```powershell
+    $env:PYTHONPATH='.'; solara run sugarscape_g1mt.app -- --mesa-dev
+    ```
+*   **Windows (CMD):**
+    ```batch
+    set PYTHONPATH=. & solara run sugarscape_g1mt.app -- --mesa-dev
+    ```
+*   **Linux / macOS:**
+    ```bash
+    PYTHONPATH=. solara run sugarscape_g1mt.app -- --mesa-dev
+    ```
+
+### Batch Experiments (Command-Line)
+
+The `run_batch.py` script is used for running one or more simulations without the GUI, with all results logged to the database.
+
+*   **Command Structure:**
+    ```bash
+    python -m sugarscape_g1mt.run_batch [options]
+    ```
+*   **Example (Single Run with Custom Parameters):**
+    ```bash
+    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Book_Baseline_Run" --initial_population 400 --agent_re_spawn false --metabolism "[1,4]" --vision "[1,6]" --endowment "[5,25]"
+    ```
+*   **Example (Parameter Sweep):**
+    ```bash
+    python -m sugarscape_g1mt.run_batch --replications 3 --initial_population "[250, 350]" --endowment "[[6,6], [10,20]]"
+    ```
+
+### End-to-End Tests
+
+The `pytest` suite runs a full simulation and asserts that the results fall within plausible scientific ranges. This is used to validate the model's integrity after code changes.
+
+*   **Command:**
+    ```bash
+    pytest sugarscape_g1mt
+    ```
+
+## Project Structure
+
+*   `model.py`: The main `SugarscapeG1mt` model class that manages the grid and agents.
+*   `agents.py`: Defines the `Trader` agent class and its logic.
+*   `app.py`: Defines the interactive Solara web application.
+*   `database_logger.py`: Contains the `DatabaseLogger` class for writing results to SQLite.
+*   `run_batch.py`: Command-line script for running non-interactive experiments.
+*   `sugar_map.txt`: Provides the sugar landscape in a raster-type format.
+*   `pytest.ini`: Configuration file for the test suite.
+*   `tests/`: Directory containing all automated tests.
+    *   `test_e2e_runs.py`: The end-to-end test that validates the baseline model run.
+
+## Future Work
+
+The next major milestone is to build upon this validated baseline by introducing peer-to-peer lending, allowing agents to earn returns on their surplus sugar. This will be the first step towards simulating a more complex financial system with emergent banking behavior.
 
 ## Further Reading
 
-- [Growing Artificial Societies](https://mitpress.mit.edu/9780262550253/growing-artificial-societies/)
-- [Complexity Explorer Sugarscape with Traders Tutorial](https://www.complexityexplorer.org/courses/172-agent-based-models-with-python-an-introduction-to-mesa)
+-   [Growing Artificial Societies](https://mitpress.mit.edu/9780262550253/growing-artificial-societies/)
+-   [Complexity Explorer Sugarscape with Traders Tutorial](https://www.complexityexplorer.org/courses/172-agent-based-models-with-python-an-introduction-to-mesa)
