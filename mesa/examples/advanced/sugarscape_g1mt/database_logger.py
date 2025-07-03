@@ -1,15 +1,31 @@
 import sqlite3
+import datetime
 
 class DatabaseLogger:
     """
-    Handles logging simulation data to a SQLite database.
+    Handles logging simulation data and text messages to a SQLite database.
     This version is thread-safe by creating a new connection for each
     transaction, which is necessary for use with multi-threaded servers
     like Solara.
     """
+    # Define standard logging levels
+    DEBUG = 10
+    INFO = 20
+    WARNING = 30
+    ERROR = 40
+    CRITICAL = 50
 
-    def __init__(self, db_path="simulation_results.db"):
+    LEVEL_NAMES = {
+        DEBUG: "DEBUG",
+        INFO: "INFO",
+        WARNING: "WARNING",
+        ERROR: "ERROR",
+        CRITICAL: "CRITICAL",
+    }
+
+    def __init__(self, db_path="simulation_results.db", print_level=INFO):
         self.db_path = db_path
+        self.print_level = print_level
         self._create_tables()
 
     def _get_connection(self):
@@ -56,7 +72,48 @@ class DatabaseLogger:
                     FOREIGN KEY (run_id) REFERENCES runs (run_id)
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS logs (
+                    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER,
+                    timestamp TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    FOREIGN KEY (run_id) REFERENCES runs (run_id)
+                )
+            """)
             conn.commit()
+
+    def _log(self, run_id: int, level: int, message: str):
+        """Core logging method. Writes to DB and conditionally prints."""
+        level_name = self.LEVEL_NAMES.get(level, "UNKNOWN")
+        timestamp = datetime.datetime.now().isoformat()
+        
+        # Always log to the database
+        with self._get_connection() as conn:
+            sql = "INSERT INTO logs (run_id, timestamp, level, message) VALUES (?, ?, ?, ?)"
+            conn.execute(sql, (run_id, timestamp, level_name, message))
+            conn.commit()
+
+        # Conditionally print to stdout
+        if level >= self.print_level:
+            print(f"[{timestamp}] [{level_name}] {message}")
+
+    # Public helper methods for convenience
+    def debug(self, run_id, message):
+        self._log(run_id, self.DEBUG, message)
+    
+    def info(self, run_id, message):
+        self._log(run_id, self.INFO, message)
+
+    def warning(self, run_id, message):
+        self._log(run_id, self.WARNING, message)
+
+    def error(self, run_id, message):
+        self._log(run_id, self.ERROR, message)
+
+    def critical(self, run_id, message):
+        self._log(run_id, self.CRITICAL, message)
 
     def create_new_run(self, run_meta: dict, model_params: dict):
         """Creates a new run record and logs its parameters."""

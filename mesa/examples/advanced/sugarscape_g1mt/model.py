@@ -56,13 +56,16 @@ class SugarscapeG1mt(mesa.Model):
         log_agent_data=False,
         dev_mode=False,
         seed=None,
+        db_logger=None,
+        run_id=None,
     ):
         super().__init__(seed=seed)
         
         self.dev_mode = dev_mode
-        self.db_logger = None
+        self.db_logger = db_logger
+        self.run_id = run_id
 
-        if not self.dev_mode:
+        if not self.dev_mode and self.db_logger is None:
             git_hash, is_dirty = self._get_git_info()
             if is_dirty:
                 raise RuntimeError(
@@ -143,7 +146,7 @@ class SugarscapeG1mt(mesa.Model):
                 self.endowment_min, self.endowment_max, (self.initial_population,), endpoint=True
             ),
             metabolism_sugar=self.rng.integers(
-                self.metabolism_min, self.metabolism_max, (self.initial_population,), endpoint=True  # noqa: E501
+                self.metabolism_min, self.metabolism_max, (self.initial_population,), endpoint=True
             ),
             vision=self.rng.integers(
                 self.vision_min, self.vision_max, (self.initial_population,), endpoint=True
@@ -210,7 +213,7 @@ class SugarscapeG1mt(mesa.Model):
             self.db_logger.log_model_step(self.run_id, self.steps, latest_data)
 
             if self.log_agent_data:
-                self.db_logger.log_agent_data(self.run_id, self.steps, self.schedule.agents)
+                self.db_logger.log_agent_data(self.run_id, self.steps, self.agents)
 
     def run_model(self, step_count=1000):
         for _ in range(step_count):
