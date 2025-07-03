@@ -1,8 +1,4 @@
-Of course. That's an excellent addition for clarity and ease of use. I will update the `README.md` to include the specific PowerShell syntax for setting the environment variable.
 
-Here is the revised `README.md` with the PowerShell commands included.
-
----
 
 # Sugarscape with an Investment Mechanic
 
@@ -86,6 +82,19 @@ The `run_batch.py` script is used for running one or more simulations without th
     python -m sugarscape_g1mt.run_batch --replications 3 --initial_population "[250, 350]" --endowment "[[6,6], [10,20]]"
     ```
 
+### Analysis & Visualization App
+
+The Streamlit app allows you to interactively explore and plot the results from the simulation database.
+
+*   **Base Command:**
+    ```bash
+    streamlit run sugarscape_g1mt/analysis_app.py
+    ```
+*   **Example (With Options):**
+    ```bash
+    streamlit run sugarscape_g1mt/analysis_app.py -- --limit 50 --include-tests
+    ```
+
 ### End-to-End Tests
 
 The `pytest` suite runs a full simulation and asserts that the results fall within plausible scientific ranges. This is used to validate the model's integrity after code changes.
@@ -102,6 +111,7 @@ The `pytest` suite runs a full simulation and asserts that the results fall with
 *   `app.py`: Defines the interactive Solara web application.
 *   `database_logger.py`: Contains the `DatabaseLogger` class for writing results to SQLite.
 *   `run_batch.py`: Command-line script for running non-interactive experiments.
+*   `analysis_app.py`: The Streamlit application for visualizing results.
 *   `sugar_map.txt`: Provides the sugar landscape in a raster-type format.
 *   `pytest.ini`: Configuration file for the test suite.
 *   `tests/`: Directory containing all automated tests.
