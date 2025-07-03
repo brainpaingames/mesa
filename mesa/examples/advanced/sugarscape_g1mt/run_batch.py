@@ -22,6 +22,7 @@ def run_batch():
         "width": 50, "height": 50,
         "initial_population": 350,
         "agent_re_spawn": True,
+        "sugar_regrowth_rate": 1.0,
         "endowment": [6, 6],
         "metabolism": [1, 5],
         "vision": [1, 5],

@@ -40,6 +40,7 @@ class SugarscapeG1mt(mesa.Model):
         height=50,
         initial_population=200,
         agent_re_spawn=True,
+        sugar_regrowth_rate=1.0,
         endowment_min=25,
         endowment_max=50,
         metabolism_min=1,
@@ -65,6 +66,7 @@ class SugarscapeG1mt(mesa.Model):
         self.db_logger = db_logger
         self.run_id = run_id
 
+        # This block is now only executed when running without a batch script
         if not self.dev_mode and self.db_logger is None:
             git_hash, is_dirty = self._get_git_info()
             if is_dirty:
@@ -84,6 +86,7 @@ class SugarscapeG1mt(mesa.Model):
                 "width": width, "height": height,
                 "initial_population": initial_population,
                 "agent_re_spawn": int(agent_re_spawn),
+                "sugar_regrowth_rate": sugar_regrowth_rate,
                 "endowment_min": endowment_min, "endowment_max": endowment_max,
                 "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
                 "vision_min": vision_min, "vision_max": vision_max,
@@ -102,6 +105,7 @@ class SugarscapeG1mt(mesa.Model):
         self.height = height
         self.initial_population = initial_population
         self.agent_re_spawn = agent_re_spawn
+        self.sugar_regrowth_rate = sugar_regrowth_rate
         self.endowment_min = endowment_min
         self.endowment_max = endowment_max
         self.metabolism_min = metabolism_min
@@ -181,16 +185,9 @@ class SugarscapeG1mt(mesa.Model):
         """
         A unique step function that does staged activation.
         """
-        # Create a boolean mask of all occupied cells
-        occupied_mask = np.zeros_like(self.grid.sugar.data, dtype=bool)
-        for agent in self.agents_by_type[Trader]:
-            if agent.pos:
-                occupied_mask[agent.pos[1], agent.pos[0]] = True
-        
-        # Regrow sugar only on unoccupied cells
-        regrowth_sugar = self.grid.sugar.data.copy()
-        regrowth_sugar[~occupied_mask] += 1
-        self.grid.sugar.data = np.minimum(regrowth_sugar, self.sugar_distribution)
+        self.grid.sugar.data = np.minimum(
+            self.grid.sugar.data + self.sugar_regrowth_rate, self.sugar_distribution
+        )
 
         self.deaths_this_step = 0
         trader_shuffle = self.agents_by_type[Trader].shuffle()
