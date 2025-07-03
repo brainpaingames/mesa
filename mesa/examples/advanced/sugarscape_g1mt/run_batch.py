@@ -3,8 +3,8 @@ import argparse
 import json
 import subprocess
 import datetime
-from model import SugarscapeG1mt
-from database_logger import DatabaseLogger
+from .model import SugarscapeG1mt
+from .database_logger import DatabaseLogger
 
 def flexible_type(value):
     """
@@ -31,6 +31,7 @@ def run_batch():
         "metabolism_reduction_factor": 0.5,
         "agent_look_ahead_horizon": 25,
         "log_agent_data": False,
+        "seed": 42, # <-- Add seed to the recognized parameters
     }
 
     # --- 2. Set up Argument Parser ---
@@ -49,17 +50,14 @@ def run_batch():
     param_space = {}
     cli_args = vars(args)
     
-    # A parameter is part of the sweep only if its value is a list of lists.
     for key, value in cli_args.items():
-        if key in DEFAULT_PARAMS and isinstance(value, list):
-            # Check if the first element is also a list, for ranged params
-            is_list_of_lists = len(value) > 0 and isinstance(value[0], list)
-            # Or if it's a simple list for non-ranged params
-            is_simple_list = key not in ["endowment", "metabolism", "vision"]
+        if key in DEFAULT_PARAMS:
+            is_list_of_lists = isinstance(value, list) and len(value) > 0 and isinstance(value[0], list)
+            is_simple_list_for_sweep = isinstance(value, list) and key not in ["endowment", "metabolism", "vision"]
 
-            if is_list_of_lists or is_simple_list:
+            if is_list_of_lists or is_simple_list_for_sweep:
                 param_space[key] = value
-
+    
     final_fixed_params = DEFAULT_PARAMS.copy()
     for key, value in cli_args.items():
         if key in DEFAULT_PARAMS and key not in param_space:
@@ -99,7 +97,16 @@ def run_batch():
                     run_params[f'{base_name}_max'] = value_range[1]
 
             description = ", ".join([f"{k}={v}" for k,v in combo_params.items()])
-            description = f"Rep {i+1}: {description}" if description else f"Rep {i+1}"
+            # Handle the seed for replications
+            if args.replications > 1:
+                run_params['seed'] = i
+                description = f"Rep {i+1}: {description}" if description else f"Rep {i+1}"
+            
+            # If seed is passed as a main arg, let it override replicator seed
+            if 'seed' in cli_args and cli_args['seed'] is not None:
+                run_params['seed'] = cli_args['seed']
+                description = f"Seed {run_params['seed']}: {description}"
+
 
             run_meta = { "timestamp": datetime.datetime.now().isoformat(), "git_hash": git_hash,
                          "run_group": args.run_group, "description": description }
@@ -109,7 +116,7 @@ def run_batch():
             logger.info(run_id, f"--- Running model {run_counter}/{total_runs}: {description} ---")
             
             model_init_params = run_params.copy()
-            model_init_params.update({"db_logger": logger, "run_id": run_id, "seed": i})
+            model_init_params.update({"db_logger": logger, "run_id": run_id})
 
             model = SugarscapeG1mt(**model_init_params)
             model.run_model(step_count=args.steps)

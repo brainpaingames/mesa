@@ -3,10 +3,10 @@ import numpy as np
 import mesa
 from mesa.discrete_space import OrthogonalVonNeumannGrid
 from mesa.discrete_space.property_layer import PropertyLayer
-from agents import Trader
+from .agents import Trader
 import subprocess
 import datetime
-from database_logger import DatabaseLogger
+from .database_logger import DatabaseLogger
 
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""
