@@ -40,12 +40,12 @@ class Trader(CellAgent):
         return {
             "pos_x": self.pos[0] if self.pos is not None else None,
             "pos_y": self.pos[1] if self.pos is not None else None,
-            "sugar": self.sugar,
-            "metabolism": self.metabolism_sugar,
-            "vision": self.vision,
-            "age": self.age,
-            "max_age": self.max_age,
-            "expected_lifespan": self.expected_lifespan,
+            "sugar": float(self.sugar),
+            "metabolism": float(self.metabolism_sugar),
+            "vision": int(self.vision),
+            "age": int(self.age),
+            "max_age": int(self.max_age),
+            "expected_lifespan": float(self.expected_lifespan),
             "is_investing": int(self.is_investing),
         }
 

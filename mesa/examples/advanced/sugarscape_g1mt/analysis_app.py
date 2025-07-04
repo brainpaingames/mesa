@@ -7,6 +7,9 @@ import argparse
 import os
 from sugarscape_g1mt import analysis_helpers as h
 
+# This path is relative to the root of the project where streamlit is run
+DB_PATH = Path("sugarscape_g1mt/simulation_results.db")
+
 st.set_page_config(layout="wide", page_title="Simulation Analysis")
 st.title("Time Series Analysis")
 st.markdown("Compare model-level reporters across multiple simulation runs.")
@@ -16,18 +19,17 @@ def parse_args():
     parser.add_argument("--limit", type=int, default=20, help="Number of recent runs to show. 0 for all.")
     parser.add_argument("--include-tests", action="store_true", help="Include test runs in the dropdown list.")
     try:
-        # When run via streamlit, it might have extra args we need to ignore
         args, _ = parser.parse_known_args()
         return args
     except SystemExit:
         return parser.parse_args([])
 
 def main(args):
-    db_mod_time = os.path.getmtime(h.DB_PATH) if h.DB_PATH.exists() else 0
+    db_mod_time = os.path.getmtime(DB_PATH) if DB_PATH.exists() else 0
 
     st.sidebar.header("Controls")
     
-    all_runs_df = h.get_all_runs(args.limit, args.include_tests, db_mod_time)
+    all_runs_df = h.get_all_runs(DB_PATH, args.limit, args.include_tests, db_mod_time)
 
     if all_runs_df.empty:
         st.warning("No simulation runs found in the database.")
@@ -44,7 +46,7 @@ def main(args):
 
     selected_ids = all_runs_df[all_runs_df['display'].isin(selected_display_runs)]['run_id'].tolist()
     
-    run_data = h.get_model_data_for_runs(tuple(selected_ids), db_mod_time)
+    run_data = h.get_model_data_for_runs(DB_PATH, tuple(selected_ids), db_mod_time)
 
     if run_data.empty:
         st.warning("No model-level data found for the selected runs.")

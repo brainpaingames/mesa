@@ -3,24 +3,18 @@ import pandas as pd
 import sqlite3
 from pathlib import Path
 
-# --- Configuration ---
-# This path is relative to the root of the project where streamlit is run
-DB_PATH = Path("sugarscape_g1mt/simulation_results.db")
-
-# --- Data Loading Functions with Caching ---
-
 @st.cache_data
-def get_all_runs(limit: int, include_tests: bool, _db_mod_time: float):
+def get_all_runs(db_path: Path, limit: int, include_tests: bool, _db_mod_time: float):
     """
     Connects to the DB and fetches a list of all runs.
     The _db_mod_time parameter is a dummy argument to bust the cache.
     """
-    if not DB_PATH.exists():
-        st.error(f"Database not found at {DB_PATH}. Please run a simulation first.")
+    if not db_path.exists():
+        st.error(f"Database not found at {db_path}. Please run a simulation first.")
         return pd.DataFrame()
 
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(db_path) as conn:
             base_query = "SELECT run_id, run_group, description FROM runs"
             params = []
             
@@ -42,17 +36,17 @@ def get_all_runs(limit: int, include_tests: bool, _db_mod_time: float):
         return pd.DataFrame()
 
 @st.cache_data
-def get_runs_with_agent_data(limit: int, include_tests: bool, _db_mod_time: float):
+def get_runs_with_agent_data(db_path: Path, limit: int, include_tests: bool, _db_mod_time: float):
     """
     Connects to the DB and fetches a list of runs that have agent-level data.
     The _db_mod_time parameter is a dummy argument to bust the cache.
     """
-    if not DB_PATH.exists():
-        st.error(f"Database not found at {DB_PATH}. Please run a simulation first.")
+    if not db_path.exists():
+        st.error(f"Database not found at {db_path}. Please run a simulation first.")
         return pd.DataFrame()
 
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(db_path) as conn:
             query = """
                 SELECT r.run_id, r.run_group, r.description
                 FROM runs r
@@ -81,7 +75,7 @@ def get_runs_with_agent_data(limit: int, include_tests: bool, _db_mod_time: floa
         return pd.DataFrame()
 
 @st.cache_data
-def get_model_data_for_runs(selected_run_ids: tuple, _db_mod_time: float):
+def get_model_data_for_runs(db_path: Path, selected_run_ids: tuple, _db_mod_time: float):
     """
     Fetches and pivots time-series data for selected run_ids.
     The _db_mod_time parameter is a dummy argument to bust the cache.
@@ -89,7 +83,7 @@ def get_model_data_for_runs(selected_run_ids: tuple, _db_mod_time: float):
     if not selected_run_ids:
         return pd.DataFrame()
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(db_path) as conn:
         placeholders = ','.join('?' for _ in selected_run_ids)
         query = f"""
             SELECT run_id, step, reporter_name, reporter_value
@@ -102,20 +96,28 @@ def get_model_data_for_runs(selected_run_ids: tuple, _db_mod_time: float):
     return wide_df
 
 @st.cache_data
-def get_agent_data_for_run(run_id: int, _db_mod_time: float):
+def get_agent_data_for_run(db_path: Path, run_id: int, _db_mod_time: float, _logger=None):
     """
     Fetches agent-level data for a single, selected run_id.
-    The _db_mod_time parameter is a dummy argument to bust the cache.
+    The _db_mod_time and _logger parameters are ignored by the cache.
     """
+    if _logger:
+        _logger.debug(None, f"Attempting to fetch agent data for run_id: {run_id} from DB: {db_path.resolve()}")
+
     if not run_id:
+        if _logger:
+            _logger.warning(None, "get_agent_data_for_run called with no run_id.")
         return pd.DataFrame()
     
-    with sqlite3.connect(DB_PATH) as conn:
-        query = "SELECT * FROM agent_data WHERE run_id = ?"
-        df = pd.read_sql_query(query, conn, params=(run_id,))
-
-    if df.empty:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            query = "SELECT * FROM agent_data WHERE run_id = ?"
+            df = pd.read_sql_query(query, conn, params=(run_id,))
+        if _logger:
+            _logger.debug(None, f"Query for run_id {run_id} returned a DataFrame with shape: {df.shape}")
+        return df
+    except Exception as e:
+        if _logger:
+            _logger.error(None, f"Error querying agent data for run_id {run_id}: {e}")
+        st.error(f"Database query for agent data failed: {e}")
         return pd.DataFrame()
-
-    wide_df = df.pivot_table(index=['run_id', 'step', 'agent_id'], columns='attribute_name', values='attribute_value').reset_index()
-    return wide_df
