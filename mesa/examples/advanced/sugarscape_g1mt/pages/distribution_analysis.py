@@ -43,7 +43,6 @@ def main(args):
 
     if not selected_display_runs:
         st.info("Select one or more runs from the sidebar to see their distributions.")
-        # Clear cached data if no runs are selected
         if 'processed_agent_data' in st.session_state:
             del st.session_state['processed_agent_data']
         return
@@ -51,8 +50,6 @@ def main(args):
     selected_ids_raw = agent_data_runs[agent_data_runs['display'].isin(selected_display_runs)]['run_id'].tolist()
     selected_ids = [int(i) for i in selected_ids_raw]
     
-    # --- Data Caching Logic ---
-    # Only re-process data if the run selection has changed.
     if 'processed_agent_data' not in st.session_state or set(st.session_state.get('processed_run_ids', [])) != set(selected_ids):
         all_dfs = []
         for run_id in selected_ids:
@@ -77,8 +74,6 @@ def main(args):
         st.session_state.processed_run_ids = selected_ids
     
     agent_data = st.session_state.processed_agent_data
-    # --- End Caching Logic ---
-
 
     if agent_data.empty:
         st.error("No data to display. This can happen if the selected runs have no agent data.")
@@ -150,6 +145,12 @@ def main(args):
             default=default_attrs
         )
 
+        st.sidebar.subheader("Bin Widths")
+        bin_widths = {}
+        for attr in selected_attributes:
+            default_width = 5 if attr == 'sugar' else 1
+            bin_widths[attr] = st.sidebar.number_input(f"Bin width for {attr}", value=default_width, min_value=1, step=1)
+
         if selected_attributes:
             for attribute in selected_attributes:
                 fig = px.histogram(
@@ -158,8 +159,10 @@ def main(args):
                     color="run_id",
                     barmode="group",
                     title=f"Distribution of Agent {attribute.replace('_', ' ').capitalize()} at Step {st.session_state.step}",
-                    nbins=30,
                 )
+                # Apply custom bin width
+                fig.update_traces(xbins=dict(size=bin_widths.get(attribute, 1)))
+                
                 if freeze_x_axis and attribute in axis_ranges:
                     fig.update_xaxes(range=axis_ranges[attribute])
                 if freeze_y_axis and y_range_manual:
