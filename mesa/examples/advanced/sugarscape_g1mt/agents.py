@@ -37,15 +37,16 @@ class Trader(CellAgent):
 
     def get_reportable_attributes(self):
         """Returns a dictionary of agent attributes for database logging."""
+        pos_x, pos_y = (self.cell.coordinate[0], self.cell.coordinate[1]) if self.cell is not None else (None, None)
         return {
-            "pos_x": self.pos[0],
-            "pos_y": self.pos[1],
-            "sugar": self.sugar,
-            "metabolism": self.metabolism_sugar,
-            "vision": self.vision,
-            "age": self.age,
-            "max_age": self.max_age,
-            "expected_lifespan": self.expected_lifespan,
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "sugar": float(self.sugar),
+            "metabolism": float(self.metabolism_sugar),
+            "vision": int(self.vision),
+            "age": int(self.age),
+            "max_age": int(self.max_age),
+            "expected_lifespan": float(self.expected_lifespan),
             "is_investing": int(self.is_investing),
         }
 

@@ -40,7 +40,7 @@ def run_batch():
     parser.add_argument("--replications", type=int, default=1, help="Number of times to run each parameter combination.")
     parser.add_argument("--steps", type=int, default=1000, help="Number of steps to run each simulation for.")
     parser.add_argument("--run_group", type=str, default="CLI_Batch_Run", help="A group name for this entire batch of runs.")
-    parser.add_argument("--db", default="simulation_results.db", help="Path to the simulation results database.")
+    parser.add_argument("--db", default="sugarscape_g1mt/simulation_results.db", help="Path to the simulation results database.")
 
     for key, value in DEFAULT_PARAMS.items():
         parser.add_argument(f"--{key}", type=flexible_type, default=json.dumps(value),
