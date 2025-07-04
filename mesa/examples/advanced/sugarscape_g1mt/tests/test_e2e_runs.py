@@ -32,6 +32,7 @@ def test_book_baseline_run():
         "metabolism": "[1,4]",
         "vision": "[1,6]",
         "endowment": "[5,25]",
+        "age": "[10000, 10000]",
         "sugar_regrowth_rate": "10",
         "enable_investment": "false",
         "db": str(DB_PATH)

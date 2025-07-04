@@ -26,6 +26,7 @@ def run_batch():
         "endowment": [15, 15],
         "metabolism": [1, 4],
         "vision": [1, 6],
+        "age": [60, 100],
         "enable_investment": False,
         "investment_cost": 30, "investment_duration": 2,
         "metabolism_reduction_factor": 0.5,
@@ -54,7 +55,7 @@ def run_batch():
     for key, value in cli_args.items():
         if key in DEFAULT_PARAMS:
             is_list_of_lists = isinstance(value, list) and len(value) > 0 and isinstance(value[0], list)
-            is_simple_list_for_sweep = isinstance(value, list) and key not in ["endowment", "metabolism", "vision"]
+            is_simple_list_for_sweep = isinstance(value, list) and key not in ["endowment", "metabolism", "vision", "age"]
 
             if is_list_of_lists or is_simple_list_for_sweep:
                 param_space[key] = value
@@ -90,7 +91,7 @@ def run_batch():
             run_params = {**final_fixed_params, **combo_params}
             
             # --- 5. Expand Ranged Params to Model Params ---
-            ranged_params_map = {"endowment": "endowment", "metabolism": "metabolism", "vision": "vision"}
+            ranged_params_map = {"endowment": "endowment", "metabolism": "metabolism", "vision": "vision", "age": "agent_age"}
             for key, base_name in ranged_params_map.items():
                 if key in run_params:
                     value_range = run_params.pop(key)

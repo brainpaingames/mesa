@@ -47,6 +47,8 @@ class SugarscapeG1mt(mesa.Model):
         metabolism_max=5,
         vision_min=1,
         vision_max=5,
+        agent_age_min=60,
+        agent_age_max=100,
         enable_investment=True,
         investment_cost=10,
         investment_duration=5,
@@ -90,6 +92,7 @@ class SugarscapeG1mt(mesa.Model):
                 "endowment_min": endowment_min, "endowment_max": endowment_max,
                 "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
                 "vision_min": vision_min, "vision_max": vision_max,
+                "agent_age_min": agent_age_min, "agent_age_max": agent_age_max,
                 "enable_investment": int(enable_investment),
                 "investment_cost": investment_cost,
                 "investment_duration": investment_duration,
@@ -112,6 +115,9 @@ class SugarscapeG1mt(mesa.Model):
         self.metabolism_max = metabolism_max
         self.vision_min = vision_min
         self.vision_max = vision_max
+        self.agent_age_min = agent_age_min
+        self.agent_age_max = agent_age_max
+        self.agent_expected_lifespan = (agent_age_min + agent_age_max) / 2
 
         self.enable_investment = enable_investment
         self.investment_cost = investment_cost
@@ -155,6 +161,10 @@ class SugarscapeG1mt(mesa.Model):
             vision=self.rng.integers(
                 self.vision_min, self.vision_max, (self.initial_population,), endpoint=True
             ),
+            max_age=self.rng.integers(
+                self.agent_age_min, self.agent_age_max, (self.initial_population,), endpoint=True
+            ),
+            expected_lifespan=self.agent_expected_lifespan,
         )
 
     def _add_new_agent(self):
@@ -179,6 +189,10 @@ class SugarscapeG1mt(mesa.Model):
             vision=self.rng.integers(
                 self.vision_min, self.vision_max, endpoint=True
             ),
+            max_age=self.rng.integers(
+                self.agent_age_min, self.agent_age_max, endpoint=True
+            ),
+            expected_lifespan=self.agent_expected_lifespan,
         )
 
     def step(self):

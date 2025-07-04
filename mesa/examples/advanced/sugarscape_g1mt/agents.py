@@ -23,12 +23,15 @@ class Trader(CellAgent):
     - Can invest sugar to permanently reduce metabolism.
     """
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0):
         super().__init__(model)
         self.cell = cell
         self.sugar = sugar
         self.metabolism_sugar = metabolism_sugar
         self.vision = vision
+        self.max_age = max_age
+        self.expected_lifespan = expected_lifespan
+        self.age = 0
         self.is_investing = False
         self.investment_counter = 0
 
@@ -40,6 +43,9 @@ class Trader(CellAgent):
             "sugar": self.sugar,
             "metabolism": self.metabolism_sugar,
             "vision": self.vision,
+            "age": self.age,
+            "max_age": self.max_age,
+            "expected_lifespan": self.expected_lifespan,
             "is_investing": int(self.is_investing),
         }
 
@@ -132,6 +138,7 @@ class Trader(CellAgent):
                 self.move()
                 self.eat()
 
+        self.age += 1
         self.metabolize()
         self.maybe_die()
 
@@ -188,5 +195,5 @@ class Trader(CellAgent):
         """
         Function to remove agents who have consumed all their sugar.
         """
-        if self.is_starved():
+        if self.is_starved() or self.age >= self.max_age:
             self.remove()
