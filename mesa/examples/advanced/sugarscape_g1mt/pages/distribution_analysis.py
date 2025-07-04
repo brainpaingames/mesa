@@ -43,31 +43,45 @@ def main(args):
 
     if not selected_display_runs:
         st.info("Select one or more runs from the sidebar to see their distributions.")
+        # Clear cached data if no runs are selected
+        if 'processed_agent_data' in st.session_state:
+            del st.session_state['processed_agent_data']
         return
         
     selected_ids_raw = agent_data_runs[agent_data_runs['display'].isin(selected_display_runs)]['run_id'].tolist()
     selected_ids = [int(i) for i in selected_ids_raw]
     
-    all_dfs = []
-    for run_id in selected_ids:
-        df = h.get_agent_data_for_run(DB_PATH, run_id, db_mod_time)
-        if not df.empty:
-            all_dfs.append(df)
+    # --- Data Caching Logic ---
+    # Only re-process data if the run selection has changed.
+    if 'processed_agent_data' not in st.session_state or set(st.session_state.get('processed_run_ids', [])) != set(selected_ids):
+        all_dfs = []
+        for run_id in selected_ids:
+            df = h.get_agent_data_for_run(DB_PATH, run_id, db_mod_time)
+            if not df.empty:
+                all_dfs.append(df)
+        
+        if not all_dfs:
+            st.warning(f"No agent data found for the selected runs.")
+            if 'processed_agent_data' in st.session_state:
+                del st.session_state['processed_agent_data']
+            return
+            
+        raw_agent_data = pd.concat(all_dfs, ignore_index=True)
+        agent_data = raw_agent_data.pivot_table(
+            index=['run_id', 'step', 'agent_id'], 
+            columns='attribute_name', 
+            values='attribute_value'
+        ).reset_index()
+        
+        st.session_state.processed_agent_data = agent_data
+        st.session_state.processed_run_ids = selected_ids
+    
+    agent_data = st.session_state.processed_agent_data
+    # --- End Caching Logic ---
 
-    if not all_dfs:
-        st.warning(f"No agent data found for the selected runs.")
-        return
-    
-    raw_agent_data = pd.concat(all_dfs, ignore_index=True)
-    
-    agent_data = raw_agent_data.pivot_table(
-        index=['run_id', 'step', 'agent_id'], 
-        columns='attribute_name', 
-        values='attribute_value'
-    ).reset_index()
 
     if agent_data.empty:
-        st.error("Pivoting the agent data resulted in an empty table.")
+        st.error("No data to display. This can happen if the selected runs have no agent data.")
         return
 
     min_step = int(agent_data['step'].min())
@@ -160,7 +174,7 @@ def main(args):
         else:
             st.session_state.step = min_step
         
-        time.sleep(0.01)
+        time.sleep(0.1)
         st.rerun()
 
 if __name__ == "__main__":
