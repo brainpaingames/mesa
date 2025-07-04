@@ -146,7 +146,8 @@ class DatabaseLogger:
             for agent in agents:
                 attributes = agent.get_reportable_attributes()
                 for key, value in attributes.items():
-                    agent_data_to_log.append((run_id, step, agent.unique_id, key, value))
+                    if value is not None:
+                        agent_data_to_log.append((run_id, step, agent.unique_id, key, value))
             
             cursor.executemany("INSERT INTO agent_data (run_id, step, agent_id, attribute_name, attribute_value) VALUES (?, ?, ?, ?, ?)", agent_data_to_log)
             conn.commit()
