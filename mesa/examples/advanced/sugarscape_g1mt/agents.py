@@ -23,17 +23,24 @@ class Trader(CellAgent):
     - Can invest sugar to permanently reduce metabolism.
     """
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, opportunities=None):
         super().__init__(model)
         self.cell = cell
         self.sugar = sugar
-        self.metabolism_sugar = metabolism_sugar
-        self.vision = vision
         self.max_age = max_age
         self.expected_lifespan = expected_lifespan
         self.age = 0
+
+        self.capabilities = {
+            "vision": vision,
+            "metabolism_sugar": metabolism_sugar,
+            "harvest_multipliers": [0.0, 1.0, 1.0, 1.0, 1.0]
+        }
+        self.available_opportunities = opportunities if opportunities is not None else []
+        self.completed_investment_names = set()
         self.is_investing = False
         self.investment_counter = 0
+        self.current_investment = None
 
     def get_reportable_attributes(self):
         """Returns a dictionary of agent attributes for database logging."""
@@ -42,8 +49,8 @@ class Trader(CellAgent):
             "pos_x": pos_x,
             "pos_y": pos_y,
             "sugar": float(self.sugar),
-            "metabolism": float(self.metabolism_sugar),
-            "vision": int(self.vision),
+            "metabolism": float(self.capabilities["metabolism_sugar"]),
+            "vision": int(self.capabilities["vision"]),
             "age": int(self.age),
             "max_age": int(self.max_age),
             "expected_lifespan": float(self.expected_lifespan),
@@ -63,81 +70,19 @@ class Trader(CellAgent):
         """
         return self.sugar <= 0
 
-    def get_max_harvestable_sugar(self):
-        """Helper to perceive the best foraging spot in the current vision."""
-        empty_cells = [
-            cell
-            for cell in self.cell.get_neighborhood(self.vision, include_center=False)
-            if cell.is_empty
-        ]
-        if not empty_cells:
-            return 0
-        return max(cell.sugar for cell in empty_cells)
-
-    def simulate_forage_scenario(self, horizon):
-        """Simulates future sugar if agent only forages."""
-        sim_sugar = self.sugar
-        expected_harvest = self.get_max_harvestable_sugar()
-
-        for _ in range(horizon):
-            sim_sugar += expected_harvest
-            sim_sugar -= self.metabolism_sugar
-            if sim_sugar < 0:
-                return -1, True
-        return sim_sugar, False
-
-    def simulate_invest_scenario(self, horizon):
-        """Simulates future sugar if agent invests then forages."""
-        if (not self.model.enable_investment) or (self.sugar < self.model.investment_cost):
-            return -1, True # Cannot afford or feature disabled, scenario is invalid
-        
-        sim_sugar = self.sugar - self.model.investment_cost
-        expected_harvest = self.get_max_harvestable_sugar()
-        current_sim_metabolism = self.metabolism_sugar
-        
-        for i in range(horizon):
-            if i < self.model.investment_duration:
-                pass
-            else:
-                if i == self.model.investment_duration:
-                    current_sim_metabolism *= self.model.metabolism_reduction_factor
-                sim_sugar += expected_harvest
-            
-            sim_sugar -= current_sim_metabolism
-            if sim_sugar < 0:
-                return -1, True
-
-        return sim_sugar, False
-
     def step(self):
         """Main step logic for the agent."""
         if self.is_investing:
             self.investment_counter -= 1
             if self.investment_counter <= 0:
-                self.metabolism_sugar *= self.model.metabolism_reduction_factor
+                self.current_investment.apply_reward_to(self.capabilities)
+                self.completed_investment_names.add(self.current_investment.name)
                 self.is_investing = False
-        
+                self.current_investment = None
         else:
-            horizon = self.model.agent_look_ahead_horizon
-            forage_utility, forage_death = self.simulate_forage_scenario(horizon)
-            invest_utility, invest_death = self.simulate_invest_scenario(horizon)
-
-            chosen_action = "FORAGE"
-            if forage_death and not invest_death:
-                chosen_action = "INVEST"
-            elif not forage_death and invest_death:
-                chosen_action = "FORAGE"
-            elif not forage_death and not invest_death:
-                if invest_utility > forage_utility:
-                    chosen_action = "INVEST"
-            
-            if chosen_action == "INVEST":
-                self.sugar -= self.model.investment_cost
-                self.is_investing = True
-                self.investment_counter = self.model.investment_duration
-            else:
-                self.move()
-                self.eat()
+            # Placeholder for Phase 4: For now, just forage.
+            self.move()
+            self.eat()
 
         self.age += 1
         self.metabolize()
@@ -151,14 +96,17 @@ class Trader(CellAgent):
         3. Find the closest of the best options.
         4. Move to the chosen cell.
         """
+        vision = self.capabilities['vision']
+        multipliers = self.capabilities['harvest_multipliers']
+
         neighboring_cells = [
             cell
-            for cell in self.cell.get_neighborhood(self.vision, include_center=True)
+            for cell in self.cell.get_neighborhood(vision, include_center=True)
             if cell.is_empty
         ]
 
         welfares = [
-            self.calculate_welfare(self.sugar + cell.sugar)
+            self.calculate_welfare(self.sugar + (cell.sugar * multipliers[int(self.model.sugar_distribution[cell.coordinate[1], cell.coordinate[0]])]))
             for cell in neighboring_cells
         ]
 
@@ -185,12 +133,14 @@ class Trader(CellAgent):
         """
         Agent harvests sugar from its current cell.
         """
-        self.sugar += self.cell.sugar
+        capacity = int(self.model.sugar_distribution[self.cell.coordinate[1], self.cell.coordinate[0]])
+        multiplier = self.capabilities['harvest_multipliers'][capacity]
+        self.sugar += self.cell.sugar * multiplier
         self.cell.sugar = 0
 
     def metabolize(self):
         """Agent consumes sugar for metabolism."""
-        self.sugar -= self.metabolism_sugar
+        self.sugar -= self.capabilities['metabolism_sugar']
         
     def maybe_die(self):
         """

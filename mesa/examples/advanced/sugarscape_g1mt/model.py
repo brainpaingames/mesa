@@ -7,6 +7,8 @@ from .agents import Trader
 import subprocess
 import datetime
 from .database_logger import DatabaseLogger
+from .investment import InvestmentOpportunity
+import copy
 
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""
@@ -49,10 +51,6 @@ class SugarscapeG1mt(mesa.Model):
         vision_max=5,
         agent_age_min=60,
         agent_age_max=100,
-        enable_investment=True,
-        investment_cost=10,
-        investment_duration=5,
-        metabolism_reduction_factor=0.8,
         agent_look_ahead_horizon=15,
         run_group="default",
         description="A simulation run.",
@@ -93,10 +91,6 @@ class SugarscapeG1mt(mesa.Model):
                 "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
                 "vision_min": vision_min, "vision_max": vision_max,
                 "agent_age_min": agent_age_min, "agent_age_max": agent_age_max,
-                "enable_investment": int(enable_investment),
-                "investment_cost": investment_cost,
-                "investment_duration": investment_duration,
-                "metabolism_reduction_factor": metabolism_reduction_factor,
                 "agent_look_ahead_horizon": agent_look_ahead_horizon,
                 "log_agent_data": int(log_agent_data),
             }
@@ -119,10 +113,6 @@ class SugarscapeG1mt(mesa.Model):
         self.agent_age_max = agent_age_max
         self.agent_expected_lifespan = (agent_age_min + agent_age_max) / 2
 
-        self.enable_investment = enable_investment
-        self.investment_cost = investment_cost
-        self.investment_duration = investment_duration
-        self.metabolism_reduction_factor = metabolism_reduction_factor
         self.agent_look_ahead_horizon = agent_look_ahead_horizon
         self.log_agent_data = log_agent_data
 
@@ -131,13 +121,36 @@ class SugarscapeG1mt(mesa.Model):
         self.grid = OrthogonalVonNeumannGrid(
             (self.width, self.height), torus=False, random=self.random
         )
+
+        self.investment_opportunities = [
+            InvestmentOpportunity(
+                name="Advanced Foraging I",
+                requirements={"prerequisites": set()},
+                cost={"duration": 5, "metabolism_during_investment": 4.0},
+                reward={
+                    "vision": vision_min,
+                    "metabolism_sugar": metabolism_min,
+                    "harvest_multipliers": [0.0, 1.0, 1.2, 1.5, 1.0]
+                }
+            ),
+            InvestmentOpportunity(
+                name="Enhanced Vision",
+                requirements={"prerequisites": {"Advanced Foraging I"}},
+                cost={"duration": 3, "metabolism_during_investment": 4.0},
+                reward={
+                    "vision": vision_min + 2,
+                    "metabolism_sugar": metabolism_min,
+                    "harvest_multipliers": [0.0, 1.0, 1.2, 1.5, 1.0]
+                }
+            )
+        ]
         
         self.datacollector = mesa.DataCollector(
             model_reporters={
                 "#Traders": lambda m: len(m.agents),
                 "Total Sugar": lambda m: sum(a.sugar for a in m.agents),
                 "Investing Agents": lambda m: len([a for a in m.agents if a.is_investing]),
-                "Average Metabolism": lambda m: np.mean([a.metabolism_sugar for a in m.agents]) if m.agents else 0,
+                "Average Metabolism": lambda m: np.mean([a.capabilities['metabolism_sugar'] for a in m.agents]) if m.agents else 0,
                 "Gini": Gini,
                 "Deaths": lambda m: getattr(m, 'deaths_this_step', 0),
             },
@@ -165,6 +178,7 @@ class SugarscapeG1mt(mesa.Model):
                 self.agent_age_min, self.agent_age_max, (self.initial_population,), endpoint=True
             ),
             expected_lifespan=self.agent_expected_lifespan,
+            opportunities=[copy.deepcopy(opp) for opp in self.investment_opportunities]
         )
 
     def _add_new_agent(self):
@@ -193,6 +207,7 @@ class SugarscapeG1mt(mesa.Model):
                 self.agent_age_min, self.agent_age_max, endpoint=True
             ),
             expected_lifespan=self.agent_expected_lifespan,
+            opportunities=[copy.deepcopy(opp) for opp in self.investment_opportunities]
         )
 
     def step(self):

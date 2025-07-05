@@ -72,10 +72,6 @@ model_params = {
     "vision_max": Slider("Max Vision", value=6, min=0, max=10, step=1),
     "agent_age_min": Slider("Min Agent Age", value=60, min=0, max=150, step=5),
     "agent_age_max": Slider("Max Agent Age", value=60, min=0, max=150, step=5),
-    "enable_investment": {"type": "Checkbox", "value": False, "label": "Enable Investment"},
-    "investment_cost": Slider("Investment Cost", value=10, min=0, max=50, step=1),
-    "investment_duration": Slider("Investment Duration", value=5, min=1, max=20, step=1),
-    "metabolism_reduction_factor": Slider("Metabolism Reduction Factor", value=0.8, min=0.1, max=1.0, step=0.05),
     "agent_look_ahead_horizon": Slider("Agent Planning Horizon", value=15, min=5, max=50, step=1),
 }
 
