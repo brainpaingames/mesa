@@ -8,7 +8,6 @@ import subprocess
 import datetime
 from .database_logger import DatabaseLogger
 from .investment import InvestmentOpportunity
-import copy
 
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""
@@ -112,7 +111,6 @@ class SugarscapeG1mt(mesa.Model):
         self.agent_age_min = agent_age_min
         self.agent_age_max = agent_age_max
         self.agent_expected_lifespan = (agent_age_min + agent_age_max) / 2
-
         self.agent_look_ahead_horizon = agent_look_ahead_horizon
         self.log_agent_data = log_agent_data
 
@@ -121,29 +119,6 @@ class SugarscapeG1mt(mesa.Model):
         self.grid = OrthogonalVonNeumannGrid(
             (self.width, self.height), torus=False, random=self.random
         )
-
-        self.investment_opportunities = [
-            InvestmentOpportunity(
-                name="Advanced Foraging I",
-                requirements={"prerequisites": set()},
-                cost={"duration": 5, "metabolism_during_investment": 4.0},
-                reward={
-                    "vision": vision_min,
-                    "metabolism_sugar": metabolism_min,
-                    "harvest_multipliers": [0.0, 1.0, 1.2, 1.5, 1.0]
-                }
-            ),
-            InvestmentOpportunity(
-                name="Enhanced Vision",
-                requirements={"prerequisites": {"Advanced Foraging I"}},
-                cost={"duration": 3, "metabolism_during_investment": 4.0},
-                reward={
-                    "vision": vision_min + 2,
-                    "metabolism_sugar": metabolism_min,
-                    "harvest_multipliers": [0.0, 1.0, 1.2, 1.5, 1.0]
-                }
-            )
-        ]
         
         self.datacollector = mesa.DataCollector(
             model_reporters={
@@ -178,8 +153,34 @@ class SugarscapeG1mt(mesa.Model):
                 self.agent_age_min, self.agent_age_max, (self.initial_population,), endpoint=True
             ),
             expected_lifespan=self.agent_expected_lifespan,
-            opportunities=[copy.deepcopy(opp) for opp in self.investment_opportunities]
+            agent_look_ahead_horizon=self.agent_look_ahead_horizon,
+            opportunities=self._create_agent_opportunities()
         )
+
+    def _create_agent_opportunities(self):
+        """Creates a fresh list of investment opportunities for an agent."""
+        return [
+            InvestmentOpportunity(
+                name="Advanced Foraging I",
+                requirements={"prerequisites": set()},
+                cost={"duration": 5, "metabolism_during_investment": 4.0},
+                reward={
+                    "vision": self.vision_min,
+                    "metabolism_sugar": self.metabolism_min,
+                    "harvest_multipliers": [0.0, 1.0, 1.2, 1.5, 1.0]
+                }
+            ),
+            InvestmentOpportunity(
+                name="Enhanced Vision",
+                requirements={"prerequisites": {"Advanced Foraging I"}},
+                cost={"duration": 3, "metabolism_during_investment": 4.0},
+                reward={
+                    "vision": self.vision_min + 2,
+                    "metabolism_sugar": self.metabolism_min,
+                    "harvest_multipliers": [0.0, 1.0, 1.2, 1.5, 1.0]
+                }
+            )
+        ]
 
     def _add_new_agent(self):
         """Helper method to add a single new agent to the model."""
@@ -207,7 +208,8 @@ class SugarscapeG1mt(mesa.Model):
                 self.agent_age_min, self.agent_age_max, endpoint=True
             ),
             expected_lifespan=self.agent_expected_lifespan,
-            opportunities=[copy.deepcopy(opp) for opp in self.investment_opportunities]
+            agent_look_ahead_horizon=self.agent_look_ahead_horizon,
+            opportunities=self._create_agent_opportunities()
         )
 
     def step(self):
