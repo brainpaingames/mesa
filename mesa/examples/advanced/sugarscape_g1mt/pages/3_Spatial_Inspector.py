@@ -4,6 +4,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import argparse
 import os
+import time
 
 # This block adds the project root to the python path.
 project_root = Path(__file__).resolve().parent.parent.parent
@@ -61,10 +62,10 @@ def main(args):
         st.warning("No runs with agent-level data logging found. Please run a simulation with 'Log Agent-Level Data' enabled.")
         return
 
-    # For this page, we only inspect one run at a time.
     selected_run_display = st.sidebar.selectbox(
         "Select a run to inspect:",
         options=agent_data_runs['display'].tolist(),
+        key="spatial_run_select" # Add key to prevent state issues on widget recreation
     )
 
     if not selected_run_display:
@@ -79,20 +80,38 @@ def main(args):
         st.error(f"Could not retrieve step range for Run {run_id}.")
         return
 
-    selected_step = st.sidebar.slider(
+    # --- Animation and State Logic ---
+    if 'step' not in st.session_state or st.session_state.get('run_id') != run_id:
+        st.session_state.step = min_step
+        st.session_state.playing = False
+        st.session_state.run_id = run_id
+    
+    col1, col2, col3 = st.sidebar.columns(3)
+    if col1.button("Play", use_container_width=True):
+        st.session_state.playing = True
+    if col2.button("Stop", use_container_width=True):
+        st.session_state.playing = False
+    if col3.button("Step", use_container_width=True):
+        st.session_state.step = min(st.session_state.step + 1, max_step)
+        st.session_state.playing = False
+
+    new_step = st.sidebar.slider(
         "Simulation Step", 
         min_value=min_step, 
         max_value=max_step, 
-        value=min_step,
+        value=st.session_state.step,
         step=1
     )
+    if new_step != st.session_state.step:
+        st.session_state.step = new_step
+        st.session_state.playing = False
     
     # Fetch data for the selected step
-    agent_df = h.get_agent_data_for_step(DB_PATH, run_id, selected_step)
-    sugar_map = h.get_spatial_layer_for_step(DB_PATH, run_id, selected_step, 'sugar')
+    agent_df = h.get_agent_data_for_step(DB_PATH, run_id, st.session_state.step)
+    sugar_map = h.get_spatial_layer_for_step(DB_PATH, run_id, st.session_state.step, 'sugar')
     run_params = h.get_run_params(DB_PATH, run_id)
     
-    st.header(f"Spatial View for Run {run_id} at Step {selected_step}")
+    st.header(f"Spatial View for Run {run_id} at Step {st.session_state.step}")
     
     if sugar_map is None:
         st.warning("No sugar distribution data found for this step.")
@@ -100,6 +119,16 @@ def main(args):
     else:
         fig = render_spatial_view(agent_df, sugar_map, run_params)
         st.pyplot(fig, use_container_width=False)
+
+    # --- Animation Loop ---
+    if st.session_state.playing:
+        if st.session_state.step < max_step:
+            st.session_state.step += 1
+        else: # Loop back to the start
+            st.session_state.step = min_step
+        
+        time.sleep(0.1) # Control animation speed
+        st.rerun()
 
 def parse_args():
     parser = argparse.ArgumentParser()
