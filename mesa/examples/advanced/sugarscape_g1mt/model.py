@@ -6,7 +6,9 @@ from mesa.discrete_space.property_layer import PropertyLayer
 from .agents import Trader
 import subprocess
 import datetime
+import json
 from .database_logger import DatabaseLogger
+from .investment import InvestmentOpportunity
 
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""
@@ -41,6 +43,9 @@ class SugarscapeG1mt(mesa.Model):
         initial_population=200,
         agent_re_spawn=True,
         sugar_regrowth_rate=1.0,
+        investments_enabled=True,
+        investment_portfolio_name="default",
+        investment_json_path="sugarscape_g1mt/investments.json",
         endowment_min=25,
         endowment_max=50,
         metabolism_min=1,
@@ -49,10 +54,6 @@ class SugarscapeG1mt(mesa.Model):
         vision_max=5,
         agent_age_min=60,
         agent_age_max=100,
-        enable_investment=True,
-        investment_cost=10,
-        investment_duration=5,
-        metabolism_reduction_factor=0.8,
         agent_look_ahead_horizon=15,
         run_group="default",
         description="A simulation run.",
@@ -67,6 +68,8 @@ class SugarscapeG1mt(mesa.Model):
         self.dev_mode = dev_mode
         self.db_logger = db_logger
         self.run_id = run_id
+        self.investment_portfolio_name = investment_portfolio_name
+        self.investment_json_path = investment_json_path
 
         # This block is now only executed when running without a batch script
         if not self.dev_mode and self.db_logger is None:
@@ -89,14 +92,13 @@ class SugarscapeG1mt(mesa.Model):
                 "initial_population": initial_population,
                 "agent_re_spawn": int(agent_re_spawn),
                 "sugar_regrowth_rate": sugar_regrowth_rate,
+                "investments_enabled": int(investments_enabled),
+                "investment_portfolio_name": investment_portfolio_name,
+                "investment_json_path": investment_json_path,
                 "endowment_min": endowment_min, "endowment_max": endowment_max,
                 "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
                 "vision_min": vision_min, "vision_max": vision_max,
                 "agent_age_min": agent_age_min, "agent_age_max": agent_age_max,
-                "enable_investment": int(enable_investment),
-                "investment_cost": investment_cost,
-                "investment_duration": investment_duration,
-                "metabolism_reduction_factor": metabolism_reduction_factor,
                 "agent_look_ahead_horizon": agent_look_ahead_horizon,
                 "log_agent_data": int(log_agent_data),
             }
@@ -109,6 +111,7 @@ class SugarscapeG1mt(mesa.Model):
         self.initial_population = initial_population
         self.agent_re_spawn = agent_re_spawn
         self.sugar_regrowth_rate = sugar_regrowth_rate
+        self.investments_enabled = investments_enabled
         self.endowment_min = endowment_min
         self.endowment_max = endowment_max
         self.metabolism_min = metabolism_min
@@ -118,11 +121,6 @@ class SugarscapeG1mt(mesa.Model):
         self.agent_age_min = agent_age_min
         self.agent_age_max = agent_age_max
         self.agent_expected_lifespan = (agent_age_min + agent_age_max) / 2
-
-        self.enable_investment = enable_investment
-        self.investment_cost = investment_cost
-        self.investment_duration = investment_duration
-        self.metabolism_reduction_factor = metabolism_reduction_factor
         self.agent_look_ahead_horizon = agent_look_ahead_horizon
         self.log_agent_data = log_agent_data
 
@@ -132,12 +130,14 @@ class SugarscapeG1mt(mesa.Model):
             (self.width, self.height), torus=False, random=self.random
         )
         
+        self.active_investment_portfolio = self._load_investment_portfolio()
+
         self.datacollector = mesa.DataCollector(
             model_reporters={
                 "#Traders": lambda m: len(m.agents),
                 "Total Sugar": lambda m: sum(a.sugar for a in m.agents),
                 "Investing Agents": lambda m: len([a for a in m.agents if a.is_investing]),
-                "Average Metabolism": lambda m: np.mean([a.metabolism_sugar for a in m.agents]) if m.agents else 0,
+                "Average Metabolism": lambda m: np.mean([a.get_capability('metabolism_sugar') for a in m.agents]) if m.agents else 0,
                 "Gini": Gini,
                 "Deaths": lambda m: getattr(m, 'deaths_this_step', 0),
             },
@@ -165,8 +165,44 @@ class SugarscapeG1mt(mesa.Model):
                 self.agent_age_min, self.agent_age_max, (self.initial_population,), endpoint=True
             ),
             expected_lifespan=self.agent_expected_lifespan,
+            agent_look_ahead_horizon=self.agent_look_ahead_horizon,
+            opportunities=self._create_agent_opportunities(),
+            investments_enabled=self.investments_enabled
         )
 
+    def _load_investment_portfolio(self):
+        """Loads and builds the active investment portfolio from a JSON file."""
+        try:
+            with open(self.investment_json_path, 'r') as f:
+                all_data = json.load(f)
+        except FileNotFoundError:
+            print(f"Error: Investment JSON file not found at {self.investment_json_path}")
+            return []
+        except json.JSONDecodeError:
+            print(f"Error: Could not decode JSON from {self.investment_json_path}")
+            return []
+        
+        definitions = all_data.get("definitions", {})
+        portfolios = all_data.get("portfolios", {})
+        
+        portfolio_keys = portfolios.get(self.investment_portfolio_name)
+        if portfolio_keys is None:
+            print(f"Warning: Portfolio '{self.investment_portfolio_name}' not found in {self.investment_json_path}. No investments will be loaded.")
+            return []
+            
+        portfolio = []
+        for key in portfolio_keys:
+            if key in definitions:
+                portfolio.append(InvestmentOpportunity(definitions[key], model_context=self))
+            else:
+                print(f"Warning: Investment key '{key}' from portfolio '{self.investment_portfolio_name}' not found in definitions.")
+
+        return portfolio
+
+    def _create_agent_opportunities(self):
+        """Creates a fresh list of investment opportunities for an agent."""
+        return self.active_investment_portfolio.copy()
+    
     def _add_new_agent(self):
         """Helper method to add a single new agent to the model."""
         
@@ -193,6 +229,9 @@ class SugarscapeG1mt(mesa.Model):
                 self.agent_age_min, self.agent_age_max, endpoint=True
             ),
             expected_lifespan=self.agent_expected_lifespan,
+            agent_look_ahead_horizon=self.agent_look_ahead_horizon,
+            opportunities=self._create_agent_opportunities(),
+            investments_enabled=self.investments_enabled
         )
 
     def step(self):

@@ -63,6 +63,9 @@ model_params = {
         "Initial Population", value=400, min=0, max=600, step=50
     ),
     "agent_re_spawn": {"type": "Checkbox", "value": True, "label": "Re-spawn Dead Agents"},
+    "investments_enabled": {"type": "Checkbox", "value": True, "label": "Enable Investments"},
+    "investment_portfolio_name": {"type": "InputText", "value": "default", "label": "Investment Portfolio Name"},
+    "investment_json_path": {"type": "InputText", "value": "sugarscape_g1mt/investments.json", "label": "Investment JSON Path"},
     "sugar_regrowth_rate": Slider("Sugar Regrowth Rate (>4 is instant)", value=1.0, min=0.0, max=5.0, step=0.1),
     "endowment_min": Slider("Min Initial Endowment", value=15, min=0, max=30, step=1),
     "endowment_max": Slider("Max Initial Endowment", value=15, min=0, max=30, step=1),
@@ -72,10 +75,6 @@ model_params = {
     "vision_max": Slider("Max Vision", value=6, min=0, max=10, step=1),
     "agent_age_min": Slider("Min Agent Age", value=60, min=0, max=150, step=5),
     "agent_age_max": Slider("Max Agent Age", value=60, min=0, max=150, step=5),
-    "enable_investment": {"type": "Checkbox", "value": False, "label": "Enable Investment"},
-    "investment_cost": Slider("Investment Cost", value=10, min=0, max=50, step=1),
-    "investment_duration": Slider("Investment Duration", value=5, min=1, max=20, step=1),
-    "metabolism_reduction_factor": Slider("Metabolism Reduction Factor", value=0.8, min=0.1, max=1.0, step=0.05),
     "agent_look_ahead_horizon": Slider("Agent Planning Horizon", value=15, min=5, max=50, step=1),
 }
 

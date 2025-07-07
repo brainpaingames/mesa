@@ -27,10 +27,10 @@ def run_batch():
         "metabolism": [1, 4],
         "vision": [1, 6],
         "age": [60, 100],
-        "enable_investment": False,
-        "investment_cost": 30, "investment_duration": 2,
-        "metabolism_reduction_factor": 0.5,
         "agent_look_ahead_horizon": 25,
+        "investments_enabled": True,
+        "investment_portfolio_name": "default",
+        "investment_json_path": "sugarscape_g1mt/investments.json",
         "log_agent_data": False,
         "seed": 42,
     }

@@ -1,8 +1,16 @@
+import sys
+from pathlib import Path
+
+# This block adds the project root to the python path.
+# It allows the app to be run from the command line with `streamlit run ...`
+# from the project root, while still finding the local modules.
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
 import streamlit as st
 import pandas as pd
 import sqlite3
 import plotly.express as px
-from pathlib import Path
 import argparse
 import os
 from sugarscape_g1mt import analysis_helpers as h
