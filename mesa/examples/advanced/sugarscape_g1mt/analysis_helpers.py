@@ -189,6 +189,7 @@ def get_pivoted_agent_data_for_run(db_path: Path, run_id: int, _db_mod_time: flo
     pivoted_df = df.pivot_table(
         index=['run_id', 'step', 'agent_id'], 
         columns='attribute_name', 
-        values='attribute_value'
+        values='attribute_value',
+        aggfunc='first'
     ).reset_index()
     return pivoted_df

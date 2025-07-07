@@ -6,6 +6,7 @@ import argparse
 import os
 import time
 import pandas as pd
+import json
 
 # This block adds the project root to the python path.
 project_root = Path(__file__).resolve().parent.parent.parent
@@ -32,11 +33,41 @@ def render_spatial_view(agent_df, sugar_map, run_params):
 
     # Plot agents
     if not agent_df.empty:
-        foraging_agents = agent_df[agent_df['is_investing'] == 0]
-        investing_agents = agent_df[agent_df['is_investing'] == 1]
+        # --- Agent Categorization Logic ---
+        # Ensure the 'completed_investments' column exists
+        if 'completed_investments' not in agent_df.columns:
+            agent_df['completed_investments'] = '[]'
         
-        ax.scatter(foraging_agents['pos_x'], foraging_agents['pos_y'], c='red', marker='o', s=25, label='Foraging')
-        ax.scatter(investing_agents['pos_x'], investing_agents['pos_y'], c='blue', marker='s', s=40, label='Investing')
+        # Safely parse the JSON string for each agent
+        agent_df['completed_list'] = agent_df['completed_investments'].apply(
+            lambda x: json.loads(x) if isinstance(x, str) and x.startswith('[') else []
+        )
+        
+        # Define categories based on agent state
+        is_investing_mask = (agent_df['is_investing'] == 1)
+        has_invested_mask = (agent_df['completed_list'].str.len() > 0)
+        
+        categories = [
+            {
+                "label": "Investing", "color": "blue", "marker": "s", "size": 40,
+                "mask": is_investing_mask
+            },
+            {
+                "label": "Post-Investment", "color": "purple", "marker": "P", "size": 50,
+                "mask": ~is_investing_mask & has_invested_mask
+            },
+            {
+                "label": "Foraging", "color": "red", "marker": "o", "size": 25,
+                "mask": ~is_investing_mask & ~has_invested_mask
+            },
+        ]
+        
+        # Plot each category
+        for cat in categories:
+            subset = agent_df[cat["mask"]]
+            if not subset.empty:
+                ax.scatter(subset['pos_x'], subset['pos_y'], c=cat['color'], 
+                           marker=cat['marker'], s=cat['size'], label=cat['label'])
 
     ax.set_xlim(-0.5, width - 0.5)
     ax.set_ylim(-0.5, height - 0.5)
@@ -46,8 +77,9 @@ def render_spatial_view(agent_df, sugar_map, run_params):
     ax.set_yticklabels([])
     ax.grid(True, which='both', color='k', linewidth=0.5, alpha=0.2)
     ax.set_aspect('equal')
-    if not agent_df.empty:
-        ax.legend()
+    
+    # Place legend outside the plot area to prevent it from moving
+    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
     
     return fig
 

@@ -85,6 +85,7 @@ class Trader(CellAgent):
             "expected_lifespan": float(self.expected_lifespan),
             "is_investing": int(self.is_investing),
             "agent_look_ahead_horizon": int(self.get_capability("agent_look_ahead_horizon")),
+            "completed_investments": json.dumps(list(self.completed_investment_names)),
         }
 
     def calculate_welfare(self, sugar):
