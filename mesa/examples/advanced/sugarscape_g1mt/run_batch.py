@@ -29,6 +29,8 @@ def run_batch():
         "age": [60, 100],
         "agent_look_ahead_horizon": 25,
         "investments_enabled": True,
+        "investment_portfolio_name": "default",
+        "investment_json_path": "sugarscape_g1mt/investments.json",
         "log_agent_data": False,
         "seed": 42,
     }

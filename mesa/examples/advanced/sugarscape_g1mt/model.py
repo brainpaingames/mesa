@@ -6,6 +6,7 @@ from mesa.discrete_space.property_layer import PropertyLayer
 from .agents import Trader
 import subprocess
 import datetime
+import json
 from .database_logger import DatabaseLogger
 from .investment import InvestmentOpportunity
 
@@ -43,6 +44,8 @@ class SugarscapeG1mt(mesa.Model):
         agent_re_spawn=True,
         sugar_regrowth_rate=1.0,
         investments_enabled=True,
+        investment_portfolio_name="default",
+        investment_json_path="sugarscape_g1mt/investments.json",
         endowment_min=25,
         endowment_max=50,
         metabolism_min=1,
@@ -65,6 +68,8 @@ class SugarscapeG1mt(mesa.Model):
         self.dev_mode = dev_mode
         self.db_logger = db_logger
         self.run_id = run_id
+        self.investment_portfolio_name = investment_portfolio_name
+        self.investment_json_path = investment_json_path
 
         # This block is now only executed when running without a batch script
         if not self.dev_mode and self.db_logger is None:
@@ -88,6 +93,8 @@ class SugarscapeG1mt(mesa.Model):
                 "agent_re_spawn": int(agent_re_spawn),
                 "sugar_regrowth_rate": sugar_regrowth_rate,
                 "investments_enabled": int(investments_enabled),
+                "investment_portfolio_name": investment_portfolio_name,
+                "investment_json_path": investment_json_path,
                 "endowment_min": endowment_min, "endowment_max": endowment_max,
                 "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
                 "vision_min": vision_min, "vision_max": vision_max,
@@ -123,6 +130,8 @@ class SugarscapeG1mt(mesa.Model):
             (self.width, self.height), torus=False, random=self.random
         )
         
+        self.active_investment_portfolio = self._load_investment_portfolio()
+
         self.datacollector = mesa.DataCollector(
             model_reporters={
                 "#Traders": lambda m: len(m.agents),
@@ -161,29 +170,38 @@ class SugarscapeG1mt(mesa.Model):
             investments_enabled=self.investments_enabled
         )
 
+    def _load_investment_portfolio(self):
+        """Loads and builds the active investment portfolio from a JSON file."""
+        try:
+            with open(self.investment_json_path, 'r') as f:
+                all_data = json.load(f)
+        except FileNotFoundError:
+            print(f"Error: Investment JSON file not found at {self.investment_json_path}")
+            return []
+        except json.JSONDecodeError:
+            print(f"Error: Could not decode JSON from {self.investment_json_path}")
+            return []
+        
+        definitions = all_data.get("definitions", {})
+        portfolios = all_data.get("portfolios", {})
+        
+        portfolio_keys = portfolios.get(self.investment_portfolio_name)
+        if portfolio_keys is None:
+            print(f"Warning: Portfolio '{self.investment_portfolio_name}' not found in {self.investment_json_path}. No investments will be loaded.")
+            return []
+            
+        portfolio = []
+        for key in portfolio_keys:
+            if key in definitions:
+                portfolio.append(InvestmentOpportunity(definitions[key], model_context=self))
+            else:
+                print(f"Warning: Investment key '{key}' from portfolio '{self.investment_portfolio_name}' not found in definitions.")
+
+        return portfolio
+
     def _create_agent_opportunities(self):
         """Creates a fresh list of investment opportunities for an agent."""
-        return [
-            InvestmentOpportunity(
-                name="Advanced Foraging I",
-                requirements={"prerequisites": set()},
-                cost={"duration": 3, "metabolism_during_investment": 3.1},
-                reward={
-                    "vision": 5,
-                    "metabolism_sugar": 1.0,
-                    "harvest_multipliers": [0.0, 1.0, 1.0, 1.5, 1.0],
-                    "agent_look_ahead_horizon": self.agent_look_ahead_horizon
-                }
-            ),
-            # Dummy investment to work around a bug in mesa.Agent.create_agents
-            # when creating a single agent with a shared list-based parameter.
-            InvestmentOpportunity(
-                name="Dummy Investment",
-                requirements={"prerequisites": {"IMPOSSIBLE"}}, # Prevents it from ever being available
-                cost={"duration": 999, "metabolism_during_investment": 999},
-                reward={}
-            )
-        ]
+        return self.active_investment_portfolio.copy()
     
     def _add_new_agent(self):
         """Helper method to add a single new agent to the model."""
