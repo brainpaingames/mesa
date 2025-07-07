@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 import time
+import pandas as pd
 
 # This block adds the project root to the python path.
 project_root = Path(__file__).resolve().parent.parent.parent
@@ -31,7 +32,6 @@ def render_spatial_view(agent_df, sugar_map, run_params):
 
     # Plot agents
     if not agent_df.empty:
-        # Separate agents by investment status for different markers/colors
         foraging_agents = agent_df[agent_df['is_investing'] == 0]
         investing_agents = agent_df[agent_df['is_investing'] == 1]
         
@@ -59,13 +59,13 @@ def main(args):
     agent_data_runs = h.get_runs_with_agent_data(DB_PATH, args.limit, args.include_tests, db_mod_time)
 
     if agent_data_runs.empty:
-        st.warning("No runs with agent-level data logging found. Please run a simulation with 'Log Agent-Level Data' enabled.")
+        st.warning("No runs with agent-level data logging found.")
         return
 
     selected_run_display = st.sidebar.selectbox(
         "Select a run to inspect:",
         options=agent_data_runs['display'].tolist(),
-        key="spatial_run_select" # Add key to prevent state issues on widget recreation
+        key="spatial_run_select"
     )
 
     if not selected_run_display:
@@ -74,17 +74,22 @@ def main(args):
     
     run_id = int(agent_data_runs[agent_data_runs['display'] == selected_run_display]['run_id'].iloc[0])
     
-    min_step, max_step = h.get_step_range_for_run(DB_PATH, run_id)
-    
-    if min_step is None:
-        st.error(f"Could not retrieve step range for Run {run_id}.")
-        return
+    if st.session_state.get('loaded_run_id') != run_id:
+        with st.spinner(f"Loading all data for Run {run_id}..."):
+            st.session_state.full_agent_df = h.get_pivoted_agent_data_for_run(DB_PATH, run_id, db_mod_time)
+            st.session_state.all_sugar_maps = h.get_all_spatial_layers_for_run(DB_PATH, run_id, 'sugar', db_mod_time)
+            st.session_state.run_params = h.get_run_params(DB_PATH, run_id)
+            st.session_state.loaded_run_id = run_id
+            st.session_state.playing = False
+            if not st.session_state.full_agent_df.empty:
+                st.session_state.step = int(st.session_state.full_agent_df['step'].min())
 
-    # --- Animation and State Logic ---
-    if 'step' not in st.session_state or st.session_state.get('run_id') != run_id:
-        st.session_state.step = min_step
-        st.session_state.playing = False
-        st.session_state.run_id = run_id
+    if 'full_agent_df' not in st.session_state or st.session_state.full_agent_df.empty:
+        st.error(f"No agent data loaded for Run {run_id}.")
+        return
+        
+    min_step = int(st.session_state.full_agent_df['step'].min())
+    max_step = int(st.session_state.full_agent_df['step'].max())
     
     col1, col2, col3 = st.sidebar.columns(3)
     if col1.button("Play", use_container_width=True):
@@ -92,42 +97,38 @@ def main(args):
     if col2.button("Stop", use_container_width=True):
         st.session_state.playing = False
     if col3.button("Step", use_container_width=True):
-        st.session_state.step = min(st.session_state.step + 1, max_step)
+        st.session_state.step = min(st.session_state.get('step', min_step) + 1, max_step)
         st.session_state.playing = False
 
     new_step = st.sidebar.slider(
         "Simulation Step", 
         min_value=min_step, 
         max_value=max_step, 
-        value=st.session_state.step,
+        value=st.session_state.get('step', min_step),
         step=1
     )
-    if new_step != st.session_state.step:
+    if new_step != st.session_state.get('step', min_step):
         st.session_state.step = new_step
         st.session_state.playing = False
     
-    # Fetch data for the selected step
-    agent_df = h.get_agent_data_for_step(DB_PATH, run_id, st.session_state.step)
-    sugar_map = h.get_spatial_layer_for_step(DB_PATH, run_id, st.session_state.step, 'sugar')
-    run_params = h.get_run_params(DB_PATH, run_id)
+    current_step = st.session_state.get('step', min_step)
+    agent_df = st.session_state.full_agent_df.query(f"step == {current_step}")
+    sugar_map = st.session_state.all_sugar_maps.get(current_step)
     
-    st.header(f"Spatial View for Run {run_id} at Step {st.session_state.step}")
+    st.header(f"Spatial View for Run {run_id} at Step {current_step}")
     
-    if sugar_map is None:
-        st.warning("No sugar distribution data found for this step.")
-        st.info("Ensure the model was run with agent/spatial logging enabled and is a recent version.")
-    else:
-        fig = render_spatial_view(agent_df, sugar_map, run_params)
+    if sugar_map:
+        fig = render_spatial_view(agent_df, sugar_map, st.session_state.run_params)
         st.pyplot(fig, use_container_width=False)
+    else:
+        st.warning("No sugar distribution data found for this step.")
 
-    # --- Animation Loop ---
-    if st.session_state.playing:
-        if st.session_state.step < max_step:
+    if st.session_state.get('playing', False):
+        if current_step < max_step:
             st.session_state.step += 1
-        else: # Loop back to the start
+        else:
             st.session_state.step = min_step
-        
-        time.sleep(0.1) # Control animation speed
+        time.sleep(0.1)
         st.rerun()
 
 def parse_args():

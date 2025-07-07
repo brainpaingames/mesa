@@ -157,17 +157,38 @@ def get_agent_data_for_step(db_path: Path, run_id: int, step: int):
     ).reset_index()
 
 @st.cache_data
-def get_spatial_layer_for_step(db_path: Path, run_id: int, step: int, layer_name: str):
-    """Fetches a specific spatial layer for a given run and step."""
+def get_all_spatial_layers_for_run(db_path: Path, run_id: int, layer_name: str, _db_mod_time: float):
+    """
+    NEW: Fetches all spatial layers for a run and returns a {step: data} dict.
+    The _db_mod_time is a dummy arg to bust the cache.
+    """
+    layers_by_step = {}
     with sqlite3.connect(db_path) as conn:
-        query = "SELECT layer_data FROM spatial_data WHERE run_id = ? AND step = ? AND layer_name = ?"
+        query = "SELECT step, layer_data FROM spatial_data WHERE run_id = ? AND layer_name = ?"
         try:
             cursor = conn.cursor()
-            result = cursor.execute(query, (run_id, step, layer_name)).fetchone()
-            if result:
-                return json.loads(result[0])
-            else:
-                return None
+            results = cursor.execute(query, (run_id, layer_name)).fetchall()
+            for step, layer_data_json in results:
+                layers_by_step[step] = json.loads(layer_data_json)
         except Exception as e:
             st.error(f"Error fetching spatial data: {e}")
-            return None
+    return layers_by_step
+
+@st.cache_data
+def get_pivoted_agent_data_for_run(db_path: Path, run_id: int, _db_mod_time: float):
+    """
+    NEW: Fetches and pivots agent data for an entire run. This is cached.
+    The _db_mod_time is a dummy arg to bust the cache.
+    """
+    # Note: The _logger is intentionally not passed down, as this function's
+    # primary role is high-performance caching for the UI.
+    df = get_agent_data_for_run(db_path, run_id, _db_mod_time)
+    if df.empty:
+        return pd.DataFrame()
+    
+    pivoted_df = df.pivot_table(
+        index=['run_id', 'step', 'agent_id'], 
+        columns='attribute_name', 
+        values='attribute_value'
+    ).reset_index()
+    return pivoted_df
