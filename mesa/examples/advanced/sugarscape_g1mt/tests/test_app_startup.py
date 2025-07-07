@@ -8,43 +8,28 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 
 @pytest.mark.app
-def test_solara_app_startup():
+def test_streamlit_dashboard_startup():
     """
-    Tests if the Solara app can be launched without crashing immediately.
+    Tests if the main Streamlit dashboard can be launched without crashing.
     """
-    command = [
-        "solara", "run", "sugarscape_g1mt.app",
-        "--", "--mesa-dev"
-    ]
+    # The new entry point for the Streamlit application
+    app_path = "sugarscape_g1mt/dashboard.py"
     
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(PROJECT_ROOT.parent)
-    
-    process = subprocess.Popen(command, env=env, cwd=PROJECT_ROOT.parent)
-    try:
-        time.sleep(15)
-        assert process.poll() is None, "Solara app process terminated unexpectedly."
-    finally:
-        process.terminate()
-        process.wait() # Ensure the process is fully cleaned up
-
-@pytest.mark.app
-def test_streamlit_app_startup():
-    """
-    Tests if the Streamlit app can be launched without crashing immediately.
-    """
     command = [
-        sys.executable, "-m", "streamlit", "run", "sugarscape_g1mt/analysis_app.py",
+        sys.executable, "-m", "streamlit", "run", app_path,
         "--", "--server.headless", "true"
     ]
     
+    # Setting PYTHONPATH ensures that the `sugarscape_g1mt` module can be found
+    # when the test is run from the project root.
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_ROOT.parent)
 
     process = subprocess.Popen(command, env=env, cwd=PROJECT_ROOT.parent)
     try:
+        # Give the app a moment to start up and potentially fail
         time.sleep(15)
-        assert process.poll() is None, "Streamlit app process terminated unexpectedly."
+        assert process.poll() is None, "Streamlit dashboard process terminated unexpectedly."
     finally:
         process.terminate()
         process.wait() # Ensure the process is fully cleaned up

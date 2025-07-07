@@ -1,12 +1,17 @@
+import sys
+from pathlib import Path
+
+# This block adds the project root to the python path.
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 import streamlit as st
 import plotly.express as px
 import os
 import argparse
 import time
 import pandas as pd
-from pathlib import Path
 from sugarscape_g1mt import analysis_helpers as h
-from sugarscape_g1mt.database_logger import DatabaseLogger
 
 # This path is relative to the root of the project where streamlit is run
 DB_PATH = Path("sugarscape_g1mt/simulation_results.db")

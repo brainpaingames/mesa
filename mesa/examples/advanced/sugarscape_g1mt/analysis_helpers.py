@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from pathlib import Path
+import json
 
 @st.cache_data
 def get_all_runs(db_path: Path, limit: int, include_tests: bool, _db_mod_time: float):
@@ -121,3 +122,52 @@ def get_agent_data_for_run(db_path: Path, run_id: int, _db_mod_time: float, _log
             _logger.error(None, f"Error querying agent data for run_id {run_id}: {e}")
         st.error(f"Database query for agent data failed: {e}")
         return pd.DataFrame()
+
+@st.cache_data
+def get_run_params(db_path: Path, run_id: int):
+    """
+    Fetches the parameters for a given run_id.
+    """
+    with sqlite3.connect(db_path) as conn:
+        query = "SELECT parameter_name, parameter_value FROM run_parameters WHERE run_id = ?"
+        df = pd.read_sql_query(query, conn, params=(run_id,))
+    return dict(zip(df['parameter_name'], df['parameter_value']))
+
+def get_step_range_for_run(db_path: Path, run_id: int):
+    """Gets the min and max step for a run with agent data."""
+    with sqlite3.connect(db_path) as conn:
+        query = "SELECT MIN(step), MAX(step) FROM agent_data WHERE run_id = ?"
+        try:
+            min_step, max_step = conn.execute(query, (run_id,)).fetchone()
+        except Exception:
+            min_step, max_step = None, None
+    return min_step, max_step
+
+def get_agent_data_for_step(db_path: Path, run_id: int, step: int):
+    """Fetches and pivots agent data for a specific run and step."""
+    with sqlite3.connect(db_path) as conn:
+        query = "SELECT * FROM agent_data WHERE run_id = ? AND step = ?"
+        df = pd.read_sql_query(query, conn, params=(run_id, step))
+    if df.empty:
+        return pd.DataFrame()
+    return df.pivot_table(
+        index='agent_id', 
+        columns='attribute_name', 
+        values='attribute_value'
+    ).reset_index()
+
+@st.cache_data
+def get_spatial_layer_for_step(db_path: Path, run_id: int, step: int, layer_name: str):
+    """Fetches a specific spatial layer for a given run and step."""
+    with sqlite3.connect(db_path) as conn:
+        query = "SELECT layer_data FROM spatial_data WHERE run_id = ? AND step = ? AND layer_name = ?"
+        try:
+            cursor = conn.cursor()
+            result = cursor.execute(query, (run_id, step, layer_name)).fetchone()
+            if result:
+                return json.loads(result[0])
+            else:
+                return None
+        except Exception as e:
+            st.error(f"Error fetching spatial data: {e}")
+            return None

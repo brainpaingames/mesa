@@ -264,6 +264,7 @@ class SugarscapeG1mt(mesa.Model):
 
             if self.log_agent_data:
                 self.db_logger.log_agent_data(self.run_id, self.steps, self.agents)
+                self.db_logger.log_spatial_layer(self.run_id, self.steps, "sugar", self.grid.sugar.data)
 
     def run_model(self, step_count=1000):
         for _ in range(step_count):

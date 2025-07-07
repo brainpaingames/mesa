@@ -2,14 +2,11 @@ import sys
 from pathlib import Path
 
 # This block adds the project root to the python path.
-# It allows the app to be run from the command line with `streamlit run ...`
-# from the project root, while still finding the local modules.
-project_root = Path(__file__).resolve().parent.parent
+project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 import streamlit as st
 import pandas as pd
-import sqlite3
 import plotly.express as px
 import argparse
 import os
@@ -18,7 +15,7 @@ from sugarscape_g1mt import analysis_helpers as h
 # This path is relative to the root of the project where streamlit is run
 DB_PATH = Path("sugarscape_g1mt/simulation_results.db")
 
-st.set_page_config(layout="wide", page_title="Simulation Analysis")
+st.set_page_config(layout="wide", page_title="Time Series Analysis")
 st.title("Time Series Analysis")
 st.markdown("Compare model-level reporters across multiple simulation runs.")
 
