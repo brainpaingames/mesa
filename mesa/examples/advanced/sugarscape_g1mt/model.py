@@ -125,7 +125,7 @@ class SugarscapeG1mt(mesa.Model):
                 "#Traders": lambda m: len(m.agents),
                 "Total Sugar": lambda m: sum(a.sugar for a in m.agents),
                 "Investing Agents": lambda m: len([a for a in m.agents if a.is_investing]),
-                "Average Metabolism": lambda m: np.mean([a.capabilities['metabolism_sugar'] for a in m.agents]) if m.agents else 0,
+                "Average Metabolism": lambda m: np.mean([a.get_capability('metabolism_sugar') for a in m.agents]) if m.agents else 0,
                 "Gini": Gini,
                 "Deaths": lambda m: getattr(m, 'deaths_this_step', 0),
             },
@@ -163,25 +163,24 @@ class SugarscapeG1mt(mesa.Model):
             InvestmentOpportunity(
                 name="Advanced Foraging I",
                 requirements={"prerequisites": set()},
-                cost={"duration": 5, "metabolism_during_investment": 4.0},
+                cost={"duration": 3, "metabolism_during_investment": 3.1},
                 reward={
-                    "vision": self.vision_min,
-                    "metabolism_sugar": self.metabolism_min,
-                    "harvest_multipliers": [0.0, 1.0, 1.2, 1.5, 1.0]
+                    "vision": 5,
+                    "metabolism_sugar": 1.0,
+                    "harvest_multipliers": [0.0, 1.0, 1.0, 1.5, 1.0],
+                    "agent_look_ahead_horizon": self.agent_look_ahead_horizon
                 }
             ),
+            # Dummy investment to work around a bug in mesa.Agent.create_agents
+            # when creating a single agent with a shared list-based parameter.
             InvestmentOpportunity(
-                name="Enhanced Vision",
-                requirements={"prerequisites": {"Advanced Foraging I"}},
-                cost={"duration": 3, "metabolism_during_investment": 4.0},
-                reward={
-                    "vision": self.vision_min + 2,
-                    "metabolism_sugar": self.metabolism_min,
-                    "harvest_multipliers": [0.0, 1.0, 1.2, 1.5, 1.0]
-                }
+                name="Dummy Investment",
+                requirements={"prerequisites": {"IMPOSSIBLE"}}, # Prevents it from ever being available
+                cost={"duration": 999, "metabolism_during_investment": 999},
+                reward={}
             )
         ]
-
+    
     def _add_new_agent(self):
         """Helper method to add a single new agent to the model."""
         

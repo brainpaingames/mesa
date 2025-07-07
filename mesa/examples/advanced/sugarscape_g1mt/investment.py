@@ -14,7 +14,7 @@ class InvestmentOpportunity:
         metabolism_rate = self.cost["metabolism_during_investment"]
 
         # 1. Simulate the cost period (investment duration)
-        for _ in range(duration):
+        for _ in range(duration+1):
             sim_sugar -= metabolism_rate
             if sim_sugar <= 0:
                 return -1, True  # Agent dies during investment
@@ -40,5 +40,7 @@ class InvestmentOpportunity:
 
         return sim_sugar, False
 
-    def apply_reward_to(self, capabilities_dict):
-        capabilities_dict.update(self.reward)
+    def apply_reward_to(self, agent):
+        """Applies the investment reward by calling the agent's public setter."""
+        for key, value in self.reward.items():
+            agent.set_capability(key, value)
