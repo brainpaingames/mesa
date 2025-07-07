@@ -28,6 +28,7 @@ def run_batch():
         "vision": [1, 6],
         "age": [60, 100],
         "agent_look_ahead_horizon": 25,
+        "investments_enabled": True,
         "log_agent_data": False,
         "seed": 42,
     }

@@ -63,6 +63,7 @@ model_params = {
         "Initial Population", value=400, min=0, max=600, step=50
     ),
     "agent_re_spawn": {"type": "Checkbox", "value": True, "label": "Re-spawn Dead Agents"},
+    "investments_enabled": {"type": "Checkbox", "value": True, "label": "Enable Investments"},
     "sugar_regrowth_rate": Slider("Sugar Regrowth Rate (>4 is instant)", value=1.0, min=0.0, max=5.0, step=0.1),
     "endowment_min": Slider("Min Initial Endowment", value=15, min=0, max=30, step=1),
     "endowment_max": Slider("Max Initial Endowment", value=15, min=0, max=30, step=1),

@@ -26,7 +26,7 @@ class Trader(CellAgent):
 
 # sugarscape_g1mt/agents.py
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
@@ -41,6 +41,7 @@ class Trader(CellAgent):
             "harvest_multipliers": [0.0, 1.0, 1.0, 1.0, 1.0],
             "agent_look_ahead_horizon": int(agent_look_ahead_horizon)
         }
+        self.investments_enabled = investments_enabled
         self.available_opportunities = opportunities.copy() if opportunities is not None else []
         self.completed_investment_names = set()
         self.is_investing = False
@@ -179,20 +180,21 @@ class Trader(CellAgent):
             best_is_death = forage_death
             chosen_action = ("FORAGE", None)
 
-            # 2. Evaluate all available investment opportunities
-            for opp in self.available_opportunities:
-                if opp.is_available(self):
-                    invest_utility, invest_death = opp.calculate_utility(self, horizon)
-                    
-                    # Prioritize survival, then highest utility
-                    if best_is_death and not invest_death:
-                        best_utility = invest_utility
-                        best_is_death = invest_death
-                        chosen_action = ("INVEST", opp)
-                    elif not best_is_death and not invest_death:
-                        if invest_utility > best_utility:
+            if self.investments_enabled:
+                # 2. Evaluate all available investment opportunities
+                for opp in self.available_opportunities:
+                    if opp.is_available(self):
+                        invest_utility, invest_death = opp.calculate_utility(self, horizon)
+                        
+                        # Prioritize survival, then highest utility
+                        if best_is_death and not invest_death:
                             best_utility = invest_utility
+                            best_is_death = invest_death
                             chosen_action = ("INVEST", opp)
+                        elif not best_is_death and not invest_death:
+                            if invest_utility > best_utility:
+                                best_utility = invest_utility
+                                chosen_action = ("INVEST", opp)
 
             # 3. Execute the chosen action
             action_type, investment_opp = chosen_action

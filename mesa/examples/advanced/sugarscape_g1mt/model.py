@@ -42,6 +42,7 @@ class SugarscapeG1mt(mesa.Model):
         initial_population=200,
         agent_re_spawn=True,
         sugar_regrowth_rate=1.0,
+        investments_enabled=True,
         endowment_min=25,
         endowment_max=50,
         metabolism_min=1,
@@ -86,6 +87,7 @@ class SugarscapeG1mt(mesa.Model):
                 "initial_population": initial_population,
                 "agent_re_spawn": int(agent_re_spawn),
                 "sugar_regrowth_rate": sugar_regrowth_rate,
+                "investments_enabled": int(investments_enabled),
                 "endowment_min": endowment_min, "endowment_max": endowment_max,
                 "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
                 "vision_min": vision_min, "vision_max": vision_max,
@@ -102,6 +104,7 @@ class SugarscapeG1mt(mesa.Model):
         self.initial_population = initial_population
         self.agent_re_spawn = agent_re_spawn
         self.sugar_regrowth_rate = sugar_regrowth_rate
+        self.investments_enabled = investments_enabled
         self.endowment_min = endowment_min
         self.endowment_max = endowment_max
         self.metabolism_min = metabolism_min
@@ -154,7 +157,8 @@ class SugarscapeG1mt(mesa.Model):
             ),
             expected_lifespan=self.agent_expected_lifespan,
             agent_look_ahead_horizon=self.agent_look_ahead_horizon,
-            opportunities=self._create_agent_opportunities()
+            opportunities=self._create_agent_opportunities(),
+            investments_enabled=self.investments_enabled
         )
 
     def _create_agent_opportunities(self):
@@ -208,7 +212,8 @@ class SugarscapeG1mt(mesa.Model):
             ),
             expected_lifespan=self.agent_expected_lifespan,
             agent_look_ahead_horizon=self.agent_look_ahead_horizon,
-            opportunities=self._create_agent_opportunities()
+            opportunities=self._create_agent_opportunities(),
+            investments_enabled=self.investments_enabled
         )
 
     def step(self):
