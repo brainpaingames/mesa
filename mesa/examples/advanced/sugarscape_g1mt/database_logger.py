@@ -1,5 +1,6 @@
 import sqlite3
 import datetime
+import json
 
 class DatabaseLogger:
     """
@@ -82,6 +83,16 @@ class DatabaseLogger:
                     FOREIGN KEY (run_id) REFERENCES runs (run_id)
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS spatial_data (
+                    run_id INTEGER NOT NULL,
+                    step INTEGER NOT NULL,
+                    layer_name TEXT NOT NULL,
+                    layer_data TEXT NOT NULL,
+                    PRIMARY KEY (run_id, step, layer_name),
+                    FOREIGN KEY (run_id) REFERENCES runs (run_id)
+                )
+            """)
             conn.commit()
 
     def _log(self, run_id: int, level: int, message: str):
@@ -129,6 +140,13 @@ class DatabaseLogger:
 
             conn.commit()
             return run_id
+            
+    def log_static_run_parameter(self, run_id, key, value):
+        """Logs a single key-value parameter for a run, useful for static data."""
+        with self._get_connection() as conn:
+            sql = "INSERT INTO run_parameters (run_id, parameter_name, parameter_value) VALUES (?, ?, ?)"
+            conn.execute(sql, (run_id, key, value))
+            conn.commit()
 
     def log_model_step(self, run_id: int, step: int, model_vars: dict):
         """Logs aggregated model-level results for a single step."""
@@ -150,6 +168,17 @@ class DatabaseLogger:
                         agent_data_to_log.append((run_id, step, agent.unique_id, key, value))
             
             cursor.executemany("INSERT INTO agent_data (run_id, step, agent_id, attribute_name, attribute_value) VALUES (?, ?, ?, ?, ?)", agent_data_to_log)
+            conn.commit()
+            
+    def log_spatial_layer(self, run_id: int, step: int, layer_name: str, layer_data_array):
+        """Logs a full 2D spatial layer for a single step."""
+        with self._get_connection() as conn:
+            # Convert numpy array to native Python list for JSON serialization
+            layer_data_list = layer_data_array.tolist()
+            layer_data_json = json.dumps(layer_data_list)
+            
+            sql = "INSERT INTO spatial_data (run_id, step, layer_name, layer_data) VALUES (?, ?, ?, ?)"
+            conn.execute(sql, (run_id, step, layer_name, layer_data_json))
             conn.commit()
 
     def close(self):

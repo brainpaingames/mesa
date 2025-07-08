@@ -1,12 +1,17 @@
+import sys
+from pathlib import Path
+
+# This block adds the project root to the python path.
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 import streamlit as st
 import plotly.express as px
 import os
 import argparse
 import time
 import pandas as pd
-from pathlib import Path
 from sugarscape_g1mt import analysis_helpers as h
-from sugarscape_g1mt.database_logger import DatabaseLogger
 
 # This path is relative to the root of the project where streamlit is run
 DB_PATH = Path("sugarscape_g1mt/simulation_results.db")
@@ -47,48 +52,41 @@ def main(args):
             del st.session_state['processed_agent_data']
         return
         
-    selected_ids_raw = agent_data_runs[agent_data_runs['display'].isin(selected_display_runs)]['run_id'].tolist()
-    selected_ids = [int(i) for i in selected_ids_raw]
+    selected_ids = agent_data_runs[agent_data_runs['display'].isin(selected_display_runs)]['run_id'].tolist()
     
-    if 'processed_agent_data' not in st.session_state or set(st.session_state.get('processed_run_ids', [])) != set(selected_ids):
-        all_dfs = []
-        for run_id in selected_ids:
-            df = h.get_agent_data_for_run(DB_PATH, run_id, db_mod_time)
-            if not df.empty:
-                all_dfs.append(df)
-        
-        if not all_dfs:
-            st.warning(f"No agent data found for the selected runs.")
-            if 'processed_agent_data' in st.session_state:
-                del st.session_state['processed_agent_data']
-            return
+    if st.session_state.get('processed_run_ids') != selected_ids:
+        with st.spinner("Loading and processing agent data..."):
+            all_dfs = []
+            for run_id in selected_ids:
+                # Use the new, cached, pre-pivoted function
+                df = h.get_pivoted_agent_data_for_run(DB_PATH, run_id, db_mod_time)
+                if not df.empty:
+                    all_dfs.append(df)
             
-        raw_agent_data = pd.concat(all_dfs, ignore_index=True)
-        agent_data = raw_agent_data.pivot_table(
-            index=['run_id', 'step', 'agent_id'], 
-            columns='attribute_name', 
-            values='attribute_value'
-        ).reset_index()
-        
-        st.session_state.processed_agent_data = agent_data
-        st.session_state.processed_run_ids = selected_ids
+            if not all_dfs:
+                st.warning(f"No agent data found for the selected runs.")
+                if 'processed_agent_data' in st.session_state:
+                    del st.session_state['processed_agent_data']
+                return
+            
+            st.session_state.processed_agent_data = pd.concat(all_dfs, ignore_index=True)
+            st.session_state.processed_run_ids = selected_ids
+            st.session_state.playing = False # Reset playing state
     
-    agent_data = st.session_state.processed_agent_data
-
-    if agent_data.empty:
-        st.error("No data to display. This can happen if the selected runs have no agent data.")
+    if 'processed_agent_data' not in st.session_state or st.session_state.processed_agent_data.empty:
+        st.error("No data to display.")
         return
 
+    agent_data = st.session_state.processed_agent_data
     min_step = int(agent_data['step'].min())
     max_step = int(agent_data['step'].max())
 
-    if 'step' not in st.session_state or st.session_state.step < min_step:
+    # Initialize step and playing state if they don't exist or are invalid
+    current_step = st.session_state.get('step', min_step)
+    if not (min_step <= current_step <= max_step):
         st.session_state.step = min_step
     if 'playing' not in st.session_state:
         st.session_state.playing = False
-
-    if st.session_state.step > max_step:
-        st.session_state.step = max_step
 
     col1, col2 = st.sidebar.columns(2)
     if col1.button("Play", use_container_width=True, key="play"):
@@ -160,7 +158,6 @@ def main(args):
                     barmode="group",
                     title=f"Distribution of Agent {attribute.replace('_', ' ').capitalize()} at Step {st.session_state.step}",
                 )
-                # Apply custom bin width
                 fig.update_traces(xbins=dict(size=bin_widths.get(attribute, 1)))
                 
                 if freeze_x_axis and attribute in axis_ranges:
@@ -171,7 +168,7 @@ def main(args):
         else:
             st.info("Select one or more attributes to see their distributions.")
 
-    if st.session_state.playing:
+    if st.session_state.get('playing', False):
         if st.session_state.step < max_step:
             st.session_state.step = min(st.session_state.step + 10, max_step)
         else:

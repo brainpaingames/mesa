@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from pathlib import Path
+import json
 
 @st.cache_data
 def get_all_runs(db_path: Path, limit: int, include_tests: bool, _db_mod_time: float):
@@ -121,3 +122,74 @@ def get_agent_data_for_run(db_path: Path, run_id: int, _db_mod_time: float, _log
             _logger.error(None, f"Error querying agent data for run_id {run_id}: {e}")
         st.error(f"Database query for agent data failed: {e}")
         return pd.DataFrame()
+
+@st.cache_data
+def get_run_params(db_path: Path, run_id: int):
+    """
+    Fetches the parameters for a given run_id.
+    """
+    with sqlite3.connect(db_path) as conn:
+        query = "SELECT parameter_name, parameter_value FROM run_parameters WHERE run_id = ?"
+        df = pd.read_sql_query(query, conn, params=(run_id,))
+    return dict(zip(df['parameter_name'], df['parameter_value']))
+
+def get_step_range_for_run(db_path: Path, run_id: int):
+    """Gets the min and max step for a run with agent data."""
+    with sqlite3.connect(db_path) as conn:
+        query = "SELECT MIN(step), MAX(step) FROM agent_data WHERE run_id = ?"
+        try:
+            min_step, max_step = conn.execute(query, (run_id,)).fetchone()
+        except Exception:
+            min_step, max_step = None, None
+    return min_step, max_step
+
+def get_agent_data_for_step(db_path: Path, run_id: int, step: int):
+    """Fetches and pivots agent data for a specific run and step."""
+    with sqlite3.connect(db_path) as conn:
+        query = "SELECT * FROM agent_data WHERE run_id = ? AND step = ?"
+        df = pd.read_sql_query(query, conn, params=(run_id, step))
+    if df.empty:
+        return pd.DataFrame()
+    return df.pivot_table(
+        index='agent_id', 
+        columns='attribute_name', 
+        values='attribute_value'
+    ).reset_index()
+
+@st.cache_data
+def get_all_spatial_layers_for_run(db_path: Path, run_id: int, layer_name: str, _db_mod_time: float):
+    """
+    NEW: Fetches all spatial layers for a run and returns a {step: data} dict.
+    The _db_mod_time is a dummy arg to bust the cache.
+    """
+    layers_by_step = {}
+    with sqlite3.connect(db_path) as conn:
+        query = "SELECT step, layer_data FROM spatial_data WHERE run_id = ? AND layer_name = ?"
+        try:
+            cursor = conn.cursor()
+            results = cursor.execute(query, (run_id, layer_name)).fetchall()
+            for step, layer_data_json in results:
+                layers_by_step[step] = json.loads(layer_data_json)
+        except Exception as e:
+            st.error(f"Error fetching spatial data: {e}")
+    return layers_by_step
+
+@st.cache_data
+def get_pivoted_agent_data_for_run(db_path: Path, run_id: int, _db_mod_time: float):
+    """
+    NEW: Fetches and pivots agent data for an entire run. This is cached.
+    The _db_mod_time is a dummy arg to bust the cache.
+    """
+    # Note: The _logger is intentionally not passed down, as this function's
+    # primary role is high-performance caching for the UI.
+    df = get_agent_data_for_run(db_path, run_id, _db_mod_time)
+    if df.empty:
+        return pd.DataFrame()
+    
+    pivoted_df = df.pivot_table(
+        index=['run_id', 'step', 'agent_id'], 
+        columns='attribute_name', 
+        values='attribute_value',
+        aggfunc='first'
+    ).reset_index()
+    return pivoted_df
