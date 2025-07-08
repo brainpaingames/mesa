@@ -147,11 +147,18 @@ class SugarscapeG1mt(mesa.Model):
         self.grid.add_property_layer(
             PropertyLayer.from_data("sugar", self.sugar_distribution)
         )
+        
+        if self.db_logger and self.run_id is not None:
+            self.db_logger.log_static_run_parameter(
+                self.run_id, 
+                'sugar_map_distribution', 
+                json.dumps(self.sugar_distribution.tolist())
+            )
 
         Trader.create_agents(
             self,
             self.initial_population,
-            self.random.choices(self.grid.all_cells.cells, k=self.initial_population),
+            self.random.sample(self.grid.all_cells.cells, k=self.initial_population),
             sugar=self.rng.integers(
                 self.endowment_min, self.endowment_max, (self.initial_population,), endpoint=True
             ),

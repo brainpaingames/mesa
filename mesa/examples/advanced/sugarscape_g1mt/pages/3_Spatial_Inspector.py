@@ -1,12 +1,13 @@
 import sys
 from pathlib import Path
 import streamlit as st
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import argparse
 import os
 import time
 import pandas as pd
 import json
+import numpy as np
 
 # This block adds the project root to the python path.
 project_root = Path(__file__).resolve().parent.parent.parent
@@ -21,66 +22,130 @@ st.set_page_config(layout="wide", page_title="Spatial Inspector")
 st.title("Spatial Inspector")
 st.markdown("View the 2D grid and agent locations for a single run at a specific time step.")
 
-def render_spatial_view(agent_df, sugar_map, run_params):
-    """Renders the spatial grid using Matplotlib."""
+def render_spatial_view(agent_df, sugar_map, run_params, static_sugar_map):
+    """Renders the spatial grid using Plotly for interactivity."""
     width = int(run_params.get('width', 50))
     height = int(run_params.get('height', 50))
     
-    fig, ax = plt.subplots(figsize=(10, 10))
-    
-    # Plot sugar distribution
-    ax.imshow(sugar_map, cmap='Greens', interpolation='nearest', origin='lower', vmin=0, vmax=10)
+    # --- 1. Data Preparation ---
+    sugar_map = np.array(sugar_map)
+    static_sugar_map = np.array(static_sugar_map)
 
-    # Plot agents
+    x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
+    grid_df = pd.DataFrame({'x': x_coords.flatten(), 'y': y_coords.flatten()})
+    
+    grid_df['current_sugar'] = sugar_map.flatten()
+    grid_df['max_capacity'] = static_sugar_map.flatten()
+
     if not agent_df.empty:
-        # --- Agent Categorization Logic ---
-        # Ensure the 'completed_investments' column exists
-        if 'completed_investments' not in agent_df.columns:
-            agent_df['completed_investments'] = '[]'
-        
-        # Safely parse the JSON string for each agent
-        agent_df['completed_list'] = agent_df['completed_investments'].apply(
-            lambda x: json.loads(x) if isinstance(x, str) and x.startswith('[') else []
-        )
-        
-        # Define categories based on agent state
-        is_investing_mask = (agent_df['is_investing'] == 1)
-        has_invested_mask = (agent_df['completed_list'].str.len() > 0)
-        
-        categories = [
-            {
-                "label": "Investing", "color": "blue", "marker": "s", "size": 40,
-                "mask": is_investing_mask
-            },
-            {
-                "label": "Post-Investment", "color": "purple", "marker": "P", "size": 50,
-                "mask": ~is_investing_mask & has_invested_mask
-            },
-            {
-                "label": "Foraging", "color": "red", "marker": "o", "size": 25,
-                "mask": ~is_investing_mask & ~has_invested_mask
-            },
-        ]
-        
-        # Plot each category
-        for cat in categories:
-            subset = agent_df[cat["mask"]]
-            if not subset.empty:
-                ax.scatter(subset['pos_x'], subset['pos_y'], c=cat['color'], 
-                           marker=cat['marker'], s=cat['size'], label=cat['label'])
+        agent_df_unique = agent_df.drop_duplicates(subset=['pos_x', 'pos_y'], keep='first')
+        merged_df = pd.merge(grid_df, agent_df_unique, how='left', left_on=['x', 'y'], right_on=['pos_x', 'pos_y'])
+    else:
+        merged_df = grid_df
+        for col in ['agent_id', 'sugar', 'age', 'completed_investments', 'is_investing']:
+            if col not in merged_df.columns:
+                merged_df[col] = np.nan
 
-    ax.set_xlim(-0.5, width - 0.5)
-    ax.set_ylim(-0.5, height - 0.5)
-    ax.set_xticks(range(width))
-    ax.set_yticks(range(height))
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    ax.grid(True, which='both', color='k', linewidth=0.5, alpha=0.2)
-    ax.set_aspect('equal')
+    def create_hover_text(row):
+        text = f"<b>Cell ({row['x']}, {row['y']})</b><br>"
+        text += f"Current Sugar: {row['current_sugar']:.2f}<br>"
+        text += f"Max Capacity: {row['max_capacity']:.2f}"
+        if pd.notna(row['agent_id']):
+            text += "<br><br><b>--- Occupying Agent ---</b>"
+            text += f"<br>Agent ID: {int(row['agent_id'])}"
+            text += f"<br>Agent Sugar: {row['sugar']:.2f}"
+            text += f"<br>Agent Age: {int(row['age'])}"
+            if 'completed_investments' in row and pd.notna(row['completed_investments']):
+                text += f"<br>Completed Investments: {row['completed_investments']}"
+        return text
     
-    # Place legend outside the plot area to prevent it from moving
-    ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
+    merged_df['hover_text'] = merged_df.apply(create_hover_text, axis=1)
     
+    # --- 2. Build Plotly Figure ---
+    fig = go.Figure()
+
+    # Layer 1: Heatmap for current sugar (visuals only)
+    fig.add_trace(go.Heatmap(
+        z=sugar_map,
+        colorscale='Greens',
+        showscale=True,
+        zmin=0, zmax=4, # Static color scale
+        colorbar=dict(title="Current Sugar", x=1.15, xanchor="left"),
+        hoverinfo='none'
+    ))
+
+    # Layer 2: Contour lines for max capacity
+    fig.add_trace(go.Contour(
+        z=static_sugar_map,
+        showscale=False,
+        contours_coloring='lines',
+        line_width=1,
+        line_color='gray',
+        hoverinfo='none'
+    ))
+
+    # Layer 3: Agent markers
+    # Define all categories so the legend is static
+    if 'completed_investments' not in agent_df.columns:
+        agent_df['completed_investments'] = '[]'
+    
+    agent_df['completed_list'] = agent_df['completed_investments'].apply(
+        lambda x: json.loads(x) if isinstance(x, str) and x.startswith('[') else []
+    )
+    
+    is_investing_mask = (agent_df['is_investing'] == 1)
+    has_invested_mask = (agent_df['completed_list'].str.len() > 0)
+
+    categories = [
+        {"label": "Investing", "color": "blue", "symbol": "square", "size": 10, "mask": is_investing_mask},
+        {"label": "Post-Investment", "color": "purple", "symbol": "diamond", "size": 12, "mask": ~is_investing_mask & has_invested_mask},
+        {"label": "Foraging", "color": "red", "symbol": "circle", "size": 8, "mask": ~is_investing_mask & ~has_invested_mask},
+    ]
+    
+    for cat in categories:
+        subset = agent_df[cat["mask"]]
+        # Always add the trace. If subset is empty, it draws nothing but keeps the legend entry.
+        fig.add_trace(go.Scatter(
+            x=subset['pos_x'], y=subset['pos_y'],
+            mode='markers',
+            marker=dict(color=cat['color'], symbol=cat['symbol'], size=cat['size'], line=dict(width=1, color='Black')),
+            name=cat['label'],
+            hoverinfo='none'
+        ))
+
+    # Layer 4: Transparent hover layer (must be last)
+    fig.add_trace(go.Scatter(
+        x=merged_df['x'],
+        y=merged_df['y'],
+        mode='markers',
+        text=merged_df['hover_text'],
+        hoverinfo='text',
+        marker=dict(
+            symbol='square',
+            size=16,
+            color='rgba(0,0,0,0)' # Invisible markers
+        ),
+        showlegend=False
+    ))
+
+    # --- 3. Configure Layout ---
+    fig.update_layout(
+        autosize=False,
+        width=800, height=850, # Increased height for legend below
+        xaxis=dict(showgrid=False, zeroline=False, ticks='', showticklabels=False, range=[-0.5, width - 0.5]),
+        yaxis=dict(showgrid=False, zeroline=False, ticks='', showticklabels=False, range=[-0.5, height - 0.5], scaleanchor="x", scaleratio=1),
+        legend=dict(
+            title="Agent Status",
+            orientation="h",
+            yanchor="top",
+            y=-0.05,
+            xanchor="center",
+            x=0.5
+        ),
+        margin=dict(l=40, r=40, b=40, t=40)
+    )
+    fig.update_yaxes(autorange="reversed")
+
     return fig
 
 def main(args):
@@ -113,6 +178,10 @@ def main(args):
             st.session_state.run_params = h.get_run_params(DB_PATH, run_id)
             st.session_state.loaded_run_id = run_id
             st.session_state.playing = False
+
+            sugar_map_json = st.session_state.run_params.get('sugar_map_distribution', '[]')
+            st.session_state.static_sugar_map = np.array(json.loads(sugar_map_json))
+
             if not st.session_state.full_agent_df.empty:
                 st.session_state.step = int(st.session_state.full_agent_df['step'].min())
 
@@ -123,12 +192,17 @@ def main(args):
     min_step = int(st.session_state.full_agent_df['step'].min())
     max_step = int(st.session_state.full_agent_df['step'].max())
     
-    col1, col2, col3 = st.sidebar.columns(3)
-    if col1.button("Play", use_container_width=True):
+    play_cols = st.sidebar.columns(2)
+    if play_cols[0].button("Play", use_container_width=True):
         st.session_state.playing = True
-    if col2.button("Stop", use_container_width=True):
+    if play_cols[1].button("Stop", use_container_width=True):
         st.session_state.playing = False
-    if col3.button("Step", use_container_width=True):
+
+    step_cols = st.sidebar.columns(2)
+    if step_cols[0].button("Step Back", use_container_width=True):
+        st.session_state.step = max(st.session_state.get('step', min_step) - 1, min_step)
+        st.session_state.playing = False
+    if step_cols[1].button("Step Forward", use_container_width=True):
         st.session_state.step = min(st.session_state.get('step', min_step) + 1, max_step)
         st.session_state.playing = False
 
@@ -144,14 +218,15 @@ def main(args):
         st.session_state.playing = False
     
     current_step = st.session_state.get('step', min_step)
-    agent_df = st.session_state.full_agent_df.query(f"step == {current_step}")
-    sugar_map = st.session_state.all_sugar_maps.get(current_step)
+    # Add .copy() to prevent SettingWithCopyWarning
+    agent_df_step = st.session_state.full_agent_df.query(f"step == {current_step}").copy()
+    sugar_map_step = st.session_state.all_sugar_maps.get(current_step)
     
     st.header(f"Spatial View for Run {run_id} at Step {current_step}")
     
-    if sugar_map:
-        fig = render_spatial_view(agent_df, sugar_map, st.session_state.run_params)
-        st.pyplot(fig, use_container_width=False)
+    if sugar_map_step is not None:
+        fig = render_spatial_view(agent_df_step, sugar_map_step, st.session_state.run_params, st.session_state.static_sugar_map)
+        st.plotly_chart(fig, use_container_width=False)
     else:
         st.warning("No sugar distribution data found for this step.")
 

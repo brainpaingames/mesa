@@ -140,6 +140,13 @@ class DatabaseLogger:
 
             conn.commit()
             return run_id
+            
+    def log_static_run_parameter(self, run_id, key, value):
+        """Logs a single key-value parameter for a run, useful for static data."""
+        with self._get_connection() as conn:
+            sql = "INSERT INTO run_parameters (run_id, parameter_name, parameter_value) VALUES (?, ?, ?)"
+            conn.execute(sql, (run_id, key, value))
+            conn.commit()
 
     def log_model_step(self, run_id: int, step: int, model_vars: dict):
         """Logs aggregated model-level results for a single step."""

@@ -1,69 +1,60 @@
+That is a fantastic idea. Using the `README.md` as a living document and a "state dump" for our sessions is an excellent practice. It formalizes our process, ensures the project is well-documented, and provides a perfect starting point for any future session. I agree completely.
 
+Based on the file tree you provided and the recap of our recent work, here is a comprehensively updated `README.md`. It integrates the information I was going to provide for the next session directly into the project's documentation.
+
+---
+
+### Updated `Readme.md`
 
 # Sugarscape with an Investment Mechanic
 
 ## Summary
 
-This project is a heavily modified version of the Mesa Sugarscape example, designed to incrementally build a simulation of a financial economy. The original trading and spice mechanics have been removed. Instead, this model serves as a foundation for exploring how financial systems can emerge from simple agent-based rules.
+This project is a heavily modified version of the Mesa Sugarscape example, designed to incrementally build a simulation of a financial economy. The original trading mechanics have been removed. Instead, this model serves as a foundation for exploring how financial systems can emerge from simple agent-based rules.
 
-In its current state, the model features a single population of **Traders** who forage for sugar on a 2D landscape. The core economic choice for an agent is between **Foraging** for immediate survival and **Investing** a lump sum of their sugar for a long-term benefit—a permanent reduction in their metabolic rate.
+In its current state, the model features a single population of **Traders** who forage for sugar on a 2D landscape. The core economic choice for an agent is between **Foraging** for immediate survival and **Investing** a lump sum of their sugar for a long-term benefit. The investment "menu" is now dynamically loaded from an external JSON file, allowing for easy experimentation with different economic conditions.
 
 Key features of this simulation framework include:
+-   **Configurable Investment System:** All investment opportunities are defined in an external `investments.json` file, allowing for different "portfolios" of investments to be tested without changing model code.
 -   **Look-ahead Decision-Making:** Agents use a short-term simulation to decide whether to forage or invest, picking the option that maximizes their wealth without leading to starvation.
--   **Rigorous Database Logging:** All simulation runs are logged to a SQLite database (`simulation_results.db`), recording run metadata, parameters, and step-by-step aggregate and agent-level data.
--   **Reproducibility:** In its default mode, the model requires a clean Git repository, ensuring all logged results are tied to a specific commit hash.
--   **Developer Mode:** A `--mesa-dev` flag allows for rapid, iterative testing by bypassing all database logging and Git checks.
--   **Batch Execution & Testing:** The project includes a powerful command-line script (`run_batch.py`) for running parameter sweeps and a `pytest` suite for automated end-to-end testing of the model's scientific output.
+-   **Rigorous Database Logging:** All simulation runs are logged to a SQLite database (`simulation_results.db`), recording run metadata, parameters, and step-by-step aggregate, agent-level, and spatial data.
+-   **Reproducibility:** The model requires a clean Git repository, ensuring all logged results are tied to a specific commit hash.
+-   **Multi-Page Analysis Dashboard:** A powerful Streamlit dashboard provides multiple views for deep analysis of results, including time-series comparisons, distribution analysis, and a fully interactive spatial inspector.
 
-## Agent: The `Trader`
+## Key Concepts & Architecture
 
-The model consists of a single agent type, the `Trader`, which has the following attributes:
--   A store of **sugar**, which is its wealth and lifeblood.
--   A **metabolism**, which determines how much sugar it consumes each step.
--   A **vision**, which determines how far it can see to find new sugar patches.
+### Dynamic Investments
 
-Each turn, a `Trader` can perform one of two main actions:
-1.  **Forage:** Move to the best available empty cell within its vision and harvest all the sugar on that patch.
-2.  **Invest:** If it has sufficient sugar, it can pay a significant upfront cost and become inactive for a set duration. Upon completion, its metabolism is permanently reduced, making it more efficient for the rest of its life.
+The investment system is designed to be flexible and extensible. All investment opportunities and portfolios are defined in `investments.json`. This file has two main sections:
+1.  **`definitions`**: An object where every possible investment is defined exactly once with a unique key. This adheres to the DRY (Don't Repeat Yourself) principle.
+2.  **`portfolios`**: An object where each portfolio is a named list of keys that reference the investments in the `definitions` section. The model can be configured at runtime to provide agents with a specific portfolio.
+
+### Database Logging
+
+The `DatabaseLogger` is a critical utility that captures all simulation output to a SQLite database. Key tables include:
+-   `runs`: High-level metadata for each simulation batch.
+-   `run_parameters`: The specific parameters used for each run, including static data like the sugar map layout.
+-   `model_results`: Step-by-step aggregate data (e.g., Gini coefficient, total wealth).
+-   `agent_data`: Step-by-step data for every attribute of every agent.
+-   `spatial_data`: Step-by-step snapshots of spatial layers, like the current sugar on the grid.
+
+### Analysis Dashboard
+
+The multi-page Streamlit dashboard is the primary tool for exploring simulation results.
+-   It uses a **"load-once, filter-in-memory"** strategy for high-performance interaction. When a run is selected, all its data is loaded into `st.session_state`, allowing for smooth animation and filtering without repeated database queries.
+-   The **Spatial Inspector** page features a sophisticated **Plotly** chart that overlays a heatmap, contour lines, and agent markers. It uses a dedicated transparent top layer to provide detailed hover tooltips for every cell on the grid.
 
 ## How to Run
 
 **Important:** All commands should be run from the parent directory (`.../mesa/examples/advanced/`).
 
-### Interactive App (GUI)
+### Analysis Dashboard (Streamlit)
 
-The interactive app allows you to visualize the simulation and adjust parameters on the fly.
+The interactive dashboard is the main way to visualize and explore simulation results.
 
-**1. Launch in Standard Mode:**
-
-*   **Windows (PowerShell):**
-    ```powershell
-    $env:PYTHONPATH='.'; solara run sugarscape_g1mt.app
-    ```
-*   **Windows (CMD):**
-    ```batch
-    set PYTHONPATH=. & solara run sugarscape_g1mt.app
-    ```
-*   **Linux / macOS:**
-    ```bash
-    PYTHONPATH=. solara run sugarscape_g1mt.app
-    ```
-
-**2. Launch in Developer Mode:**
-(Bypasses database logging and Git checks)
-
-*   **Windows (PowerShell):**
-    ```powershell
-    $env:PYTHONPATH='.'; solara run sugarscape_g1mt.app -- --mesa-dev
-    ```
-*   **Windows (CMD):**
-    ```batch
-    set PYTHONPATH=. & solara run sugarscape_g1mt.app -- --mesa-dev
-    ```
-*   **Linux / macOS:**
-    ```bash
-    PYTHONPATH=. solara run sugarscape_g1mt.app -- --mesa-dev
-    ```
+```bash
+streamlit run sugarscape_g1mt/dashboard.py
+```
 
 ### Batch Experiments (Command-Line)
 
@@ -73,31 +64,18 @@ The `run_batch.py` script is used for running one or more simulations without th
     ```bash
     python -m sugarscape_g1mt.run_batch [options]
     ```
-*   **Example (Single Run with Custom Parameters):**
+*   **Example (Single Run):**
     ```bash
-    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Book_Baseline_Run" --initial_population 400 --agent_re_spawn false --metabolism "[1,4]" --vision "[1,6]" --endowment "[5,25]"
+    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Baseline_Run" --initial_population 400 
     ```
 *   **Example (Parameter Sweep):**
     ```bash
     python -m sugarscape_g1mt.run_batch --replications 3 --initial_population "[250, 350]" --endowment "[[6,6], [10,20]]"
     ```
 
-### Analysis & Visualization App
-
-The Streamlit app allows you to interactively explore and plot the results from the simulation database.
-
-*   **Base Command:**
-    ```bash
-    streamlit run sugarscape_g1mt/analysis_app.py
-    ```
-*   **Example (With Options):**
-    ```bash
-    streamlit run sugarscape_g1mt/analysis_app.py -- --limit 50 --include-tests
-    ```
-
 ### End-to-End Tests
 
-The `pytest` suite runs a full simulation and asserts that the results fall within plausible scientific ranges. This is used to validate the model's integrity after code changes.
+The `pytest` suite runs a full simulation and asserts that the results fall within plausible scientific ranges.
 
 *   **Command:**
     ```bash
@@ -106,20 +84,40 @@ The `pytest` suite runs a full simulation and asserts that the results fall with
 
 ## Project Structure
 
-*   `model.py`: The main `SugarscapeG1mt` model class that manages the grid and agents.
-*   `agents.py`: Defines the `Trader` agent class and its logic.
-*   `app.py`: Defines the interactive Solara web application.
-*   `database_logger.py`: Contains the `DatabaseLogger` class for writing results to SQLite.
-*   `run_batch.py`: Command-line script for running non-interactive experiments.
-*   `analysis_app.py`: The Streamlit application for visualizing results.
-*   `sugar_map.txt`: Provides the sugar landscape in a raster-type format.
-*   `pytest.ini`: Configuration file for the test suite.
-*   `tests/`: Directory containing all automated tests.
-    *   `test_e2e_runs.py`: The end-to-end test that validates the baseline model run.
+```
+C:.
+│   model.py                # Main Mesa model class (SugarscapeG1mt)
+│   agents.py               # Defines the Trader agent class
+│   run_batch.py            # Script for command-line batch runs
+│   database_logger.py      # Class for logging all data to SQLite
+│
+│   investments.json        # External definitions for all investment opportunities
+│   investment.py           # Defines the InvestmentOpportunity data class
+│
+│   dashboard.py            # Main entry point for the Streamlit dashboard
+│   analysis_helpers.py     # Data-querying functions for the dashboard
+│
+│   sugar-map.txt           # Defines the static sugar landscape
+│   simulation_results.db   # The SQLite database for simulation results
+│   Readme.md               # This file
+│   ...
+│
+└───pages
+    │   1_Time_Series_Analysis.py
+    │   2_Distribution_Analysis.py
+    │   3_Spatial_Inspector.py
+```
 
-## Future Work
+## Development Backlog
 
-The next major milestone is to build upon this validated baseline by introducing peer-to-peer lending, allowing agents to earn returns on their surplus sugar. This will be the first step towards simulating a more complex financial system with emergent banking behavior.
+### Immediate / Short-Term Tasks
+-   Conduct parameter sweeps using the `run_batch.py` script to explore the model's behavior under different conditions.
+-   Further refine dashboard pages for clarity and analytical power.
+
+### Long-Term Goals / Epics
+-   **Peer-to-Peer Lending:** Introduce a mechanism for agents to lend surplus sugar to other agents who wish to invest, allowing for the emergence of interest rates and a basic credit system.
+-   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
+-   **Heterogeneous Investment Opportunities:** Extend the model logic to assign different investment portfolios to different agent types or individual agents based on their state or other criteria.
 
 ## Further Reading
 
