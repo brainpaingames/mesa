@@ -66,7 +66,7 @@ def render_spatial_view(agent_df, sugar_map, run_params, static_sugar_map):
 
     # Layer 1: Heatmap for current sugar (visuals only)
     fig.add_trace(go.Heatmap(
-        z=sugar_map,
+        z=sugar_map.T,
         colorscale='Greens',
         showscale=True,
         zmin=0, zmax=4, # Static color scale
@@ -76,7 +76,7 @@ def render_spatial_view(agent_df, sugar_map, run_params, static_sugar_map):
 
     # Layer 2: Contour lines for max capacity
     fig.add_trace(go.Contour(
-        z=static_sugar_map,
+        z=static_sugar_map.T,
         showscale=False,
         contours_coloring='lines',
         line_width=1,

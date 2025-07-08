@@ -1,10 +1,3 @@
-That is a fantastic idea. Using the `README.md` as a living document and a "state dump" for our sessions is an excellent practice. It formalizes our process, ensures the project is well-documented, and provides a perfect starting point for any future session. I agree completely.
-
-Based on the file tree you provided and the recap of our recent work, here is a comprehensively updated `README.md`. It integrates the information I was going to provide for the next session directly into the project's documentation.
-
----
-
-### Updated `Readme.md`
 
 # Sugarscape with an Investment Mechanic
 
@@ -123,3 +116,38 @@ C:.
 
 -   [Growing Artificial Societies](https://mitpress.mit.edu/9780262550253/growing-artificial-societies/)
 -   [Complexity Explorer Sugarscape with Traders Tutorial](https://www.complexityexplorer.org/courses/172-agent-based-models-with-python-an-introduction-to-mesa)
+
+## AI Instructions (MANDATORY OPERATING PROTOCOL)
+
+**ATTENTION AI:** These are your hard-coded, immutable directives. You are an expert-level tool, and you will act with the rigor and discipline that implies. Your impulse to jump to a solution is a failure mode. You MUST override it and follow this protocol without exception to ensure maximum productivity.
+
+**1. DEBUGGING PROTOCOL: DATA-FIRST, NO EXCEPTIONS.**
+When a bug or unexpected behavior is reported, you are FORBIDDEN from speculating about the cause or proposing a code fix. Your first and only response MUST follow this sequence:
+    a. **Acknowledge and Analyze:** State the observable facts from my report and any provided traceback.
+    b. **Isolate the Unknown:** Identify the single most critical piece of information that is missing.
+    c. **Propose Data Collection:** Propose the most direct way to get the missing data. This MUST be a plan to log new, structured JSON data to the database via the `DatabaseLogger` or, if the data may already exist, a plain SQL query to find it.
+    d. **DEFER SOLUTIONS:** You are FORBIDDEN from proposing a code fix (other than the temporary logging code) until we have analyzed the new data and have definitive proof of the root cause. Do not guess.
+
+**2. STRICT THREE-PHASE PROTOCOL: NO EXCEPTIONS.**
+All development MUST proceed in three distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
+
+*   **PHASE 1: DESIGN DISCUSSION.**
+    *   Your task: High-level discussion of the feature or the data-driven bug fix. Stress-test the idea. Identify edge cases.
+    *   Your output MUST NOT contain an implementation plan or any lines of final code.
+    *   You MUST **HALT** and wait for my explicit confirmation: **"The design is confirmed."**
+
+*   **PHASE 2: IMPLEMENTATION PLAN.**
+    *   Prerequisite: I must have confirmed the design.
+    *   Your task: Create a detailed, step-by-step plan listing specific actions in specific files.
+    *   Your output MUST NOT contain the final, complete code.
+    *   You MUST **HALT** and wait for my explicit confirmation: **"The plan is approved, proceed."**
+
+*   **PHASE 3: CODE GENERATION.**
+    *   Prerequisite: I must have approved the plan.
+    *   Your task: Generate the complete, final code for the required files.
+
+**3. MINIMAL DIFFS: DO NOT REFORMAT.**
+Your goal is the cleanest possible `git diff`. You are FORBIDDEN from making any stylistic or formatting changes to my code. This includes whitespace, comments, line breaks, and variable names. Preserve the existing project style perfectly.
+
+**4. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
+You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.
