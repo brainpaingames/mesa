@@ -104,7 +104,7 @@ class Trader(CellAgent):
     def get_potential_harvest(self, cell):
         """Calculates the potential sugar harvest from a given cell based on current capabilities."""
         multipliers = self.get_capability("harvest_multipliers")
-        capacity = int(self.model.sugar_distribution[cell.coordinate[1], cell.coordinate[0]])
+        capacity = int(self.model.sugar_distribution[cell.coordinate[0], cell.coordinate[1]])
         return cell.sugar * multipliers[capacity]
 
     def find_best_foraging_cell(self):

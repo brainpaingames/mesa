@@ -14,6 +14,7 @@ project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from sugarscape_g1mt import analysis_helpers as h
+from sugarscape_g1mt.database_logger import DatabaseLogger
 
 
 DB_PATH = Path("sugarscape_g1mt/simulation_results.db")
@@ -22,7 +23,7 @@ st.set_page_config(layout="wide", page_title="Spatial Inspector")
 st.title("Spatial Inspector")
 st.markdown("View the 2D grid and agent locations for a single run at a specific time step.")
 
-def render_spatial_view(agent_df, sugar_map, run_params, static_sugar_map):
+def render_spatial_view(db_logger, run_id, step, agent_df, sugar_map, run_params, static_sugar_map):
     """Renders the spatial grid using Plotly for interactivity."""
     width = int(run_params.get('width', 50))
     height = int(run_params.get('height', 50))
@@ -66,7 +67,7 @@ def render_spatial_view(agent_df, sugar_map, run_params, static_sugar_map):
 
     # Layer 1: Heatmap for current sugar (visuals only)
     fig.add_trace(go.Heatmap(
-        z=sugar_map.T,
+        z=sugar_map,
         colorscale='Greens',
         showscale=True,
         zmin=0, zmax=4, # Static color scale
@@ -76,7 +77,7 @@ def render_spatial_view(agent_df, sugar_map, run_params, static_sugar_map):
 
     # Layer 2: Contour lines for max capacity
     fig.add_trace(go.Contour(
-        z=static_sugar_map.T,
+        z=static_sugar_map,
         showscale=False,
         contours_coloring='lines',
         line_width=1,
@@ -106,7 +107,7 @@ def render_spatial_view(agent_df, sugar_map, run_params, static_sugar_map):
         subset = agent_df[cat["mask"]]
         # Always add the trace. If subset is empty, it draws nothing but keeps the legend entry.
         fig.add_trace(go.Scatter(
-            x=subset['pos_x'], y=subset['pos_y'],
+            x=subset['pos_y'], y=subset['pos_x'],
             mode='markers',
             marker=dict(color=cat['color'], symbol=cat['symbol'], size=cat['size'], line=dict(width=1, color='Black')),
             name=cat['label'],
@@ -150,6 +151,7 @@ def render_spatial_view(agent_df, sugar_map, run_params, static_sugar_map):
 
 def main(args):
     db_mod_time = os.path.getmtime(DB_PATH) if DB_PATH.exists() else 0
+    db_logger = DatabaseLogger(db_path=str(DB_PATH))
 
     st.sidebar.header("Controls")
     
@@ -225,7 +227,7 @@ def main(args):
     st.header(f"Spatial View for Run {run_id} at Step {current_step}")
     
     if sugar_map_step is not None:
-        fig = render_spatial_view(agent_df_step, sugar_map_step, st.session_state.run_params, st.session_state.static_sugar_map)
+        fig = render_spatial_view(db_logger, run_id, current_step, agent_df_step, sugar_map_step, st.session_state.run_params, st.session_state.static_sugar_map)
         st.plotly_chart(fig, use_container_width=False)
     else:
         st.warning("No sugar distribution data found for this step.")

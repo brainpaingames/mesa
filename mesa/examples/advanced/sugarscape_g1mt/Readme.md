@@ -22,6 +22,13 @@ The investment system is designed to be flexible and extensible. All investment 
 1.  **`definitions`**: An object where every possible investment is defined exactly once with a unique key. This adheres to the DRY (Don't Repeat Yourself) principle.
 2.  **`portfolios`**: An object where each portfolio is a named list of keys that reference the investments in the `definitions` section. The model can be configured at runtime to provide agents with a specific portfolio.
 
+### Coordinate System Convention
+
+To prevent ambiguity and errors, the project adheres to a strict coordinate system convention:
+-   **Mesa Coordinates:** Variables named `pos` or `coordinate` are always tuples in `(x, y)` format, which corresponds semantically to `(column, row)`.
+-   **NumPy Array Indexing:** Arrays are always accessed explicitly using `[row, col]` indexing.
+-   **Visualization:** Plotting libraries like Plotly receive data in `[row, col]` format for their `z` parameter (for heatmaps) and use `(x=col, y=row)` for scatter plots to ensure all layers are correctly aligned.
+
 ### Database Logging
 
 The `DatabaseLogger` is a critical utility that captures all simulation output to a SQLite database. Key tables include:
@@ -35,7 +42,7 @@ The `DatabaseLogger` is a critical utility that captures all simulation output t
 
 The multi-page Streamlit dashboard is the primary tool for exploring simulation results.
 -   It uses a **"load-once, filter-in-memory"** strategy for high-performance interaction. When a run is selected, all its data is loaded into `st.session_state`, allowing for smooth animation and filtering without repeated database queries.
--   The **Spatial Inspector** page features a sophisticated **Plotly** chart that overlays a heatmap, contour lines, and agent markers. It uses a dedicated transparent top layer to provide detailed hover tooltips for every cell on the grid.
+-   The **Spatial Inspector** page features a sophisticated **Plotly** chart that overlays a heatmap, contour lines, and agent markers. It is carefully constructed to align all spatial layers correctly, providing accurate visual feedback and detailed tooltips.
 
 ## How to Run
 
@@ -59,7 +66,7 @@ The `run_batch.py` script is used for running one or more simulations without th
     ```
 *   **Example (Single Run):**
     ```bash
-    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Baseline_Run" --initial_population 400 
+    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Baseline_Run" --initial_population 400 --log_agent_data true
     ```
 *   **Example (Parameter Sweep):**
     ```bash
@@ -128,21 +135,15 @@ When a bug or unexpected behavior is reported, you are FORBIDDEN from speculatin
     c. **Propose Data Collection:** Propose the most direct way to get the missing data. This MUST be a plan to log new, structured JSON data to the database via the `DatabaseLogger` or, if the data may already exist, a plain SQL query to find it.
     d. **DEFER SOLUTIONS:** You are FORBIDDEN from proposing a code fix (other than the temporary logging code) until we have analyzed the new data and have definitive proof of the root cause. Do not guess.
 
-**2. STRICT THREE-PHASE PROTOCOL: NO EXCEPTIONS.**
-All development MUST proceed in three distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
+**2. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
+All development MUST proceed in two distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
 
-*   **PHASE 1: DESIGN DISCUSSION.**
-    *   Your task: High-level discussion of the feature or the data-driven bug fix. Stress-test the idea. Identify edge cases.
-    *   Your output MUST NOT contain an implementation plan or any lines of final code.
-    *   You MUST **HALT** and wait for my explicit confirmation: **"The design is confirmed."**
-
-*   **PHASE 2: IMPLEMENTATION PLAN.**
-    *   Prerequisite: I must have confirmed the design.
-    *   Your task: Create a detailed, step-by-step plan listing specific actions in specific files.
+*   **PHASE 1: DESIGN & IMPLEMENTATION PLAN.**
+    *   Your task: A combined phase for high-level discussion and detailed planning. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files.
     *   Your output MUST NOT contain the final, complete code.
-    *   You MUST **HALT** and wait for my explicit confirmation: **"The plan is approved, proceed."**
+    *   You MUST **HALT** and wait for my explicit approval to proceed (e.g., "The plan is approved," "Okay, proceed," "Go on").
 
-*   **PHASE 3: CODE GENERATION.**
+*   **PHASE 2: CODE GENERATION.**
     *   Prerequisite: I must have approved the plan.
     *   Your task: Generate the complete, final code for the required files.
 
