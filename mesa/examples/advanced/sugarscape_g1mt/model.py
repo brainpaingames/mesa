@@ -62,9 +62,10 @@ class SugarscapeG1mt(mesa.Model):
         seed=None,
         db_logger=None,
         run_id=None,
+        tag="dev"
     ):
         super().__init__(seed=seed)
-        
+
         self.dev_mode = dev_mode
         self.db_logger = db_logger
         self.run_id = run_id
@@ -79,14 +80,15 @@ class SugarscapeG1mt(mesa.Model):
                     "Git repository has uncommitted changes. "
                     "Please commit your changes before running a logged simulation."
                 )
-            
+
             run_meta = {
                 "timestamp": datetime.datetime.now().isoformat(),
                 "git_hash": git_hash,
                 "run_group": run_group,
                 "description": description,
+                "tag": tag
             }
-            
+
             model_params = {
                 "width": width, "height": height,
                 "initial_population": initial_population,
@@ -102,7 +104,7 @@ class SugarscapeG1mt(mesa.Model):
                 "agent_look_ahead_horizon": agent_look_ahead_horizon,
                 "log_agent_data": int(log_agent_data),
             }
-            
+
             self.db_logger = DatabaseLogger()
             self.run_id = self.db_logger.create_new_run(run_meta, model_params)
 
@@ -129,7 +131,7 @@ class SugarscapeG1mt(mesa.Model):
         self.grid = OrthogonalVonNeumannGrid(
             (self.width, self.height), torus=False, random=self.random
         )
-        
+
         self.active_investment_portfolio = self._load_investment_portfolio()
 
         self.datacollector = mesa.DataCollector(
@@ -147,11 +149,11 @@ class SugarscapeG1mt(mesa.Model):
         self.grid.add_property_layer(
             PropertyLayer.from_data("sugar", self.sugar_distribution)
         )
-        
+
         if self.db_logger and self.run_id is not None:
             self.db_logger.log_static_run_parameter(
-                self.run_id, 
-                'sugar_map_distribution', 
+                self.run_id,
+                'sugar_map_distribution',
                 json.dumps(self.sugar_distribution.tolist())
             )
 
@@ -188,15 +190,15 @@ class SugarscapeG1mt(mesa.Model):
         except json.JSONDecodeError:
             print(f"Error: Could not decode JSON from {self.investment_json_path}")
             return []
-        
+
         definitions = all_data.get("definitions", {})
         portfolios = all_data.get("portfolios", {})
-        
+
         portfolio_keys = portfolios.get(self.investment_portfolio_name)
         if portfolio_keys is None:
             print(f"Warning: Portfolio '{self.investment_portfolio_name}' not found in {self.investment_json_path}. No investments will be loaded.")
             return []
-            
+
         portfolio = []
         for key in portfolio_keys:
             if key in definitions:
@@ -209,16 +211,16 @@ class SugarscapeG1mt(mesa.Model):
     def _create_agent_opportunities(self):
         """Creates a fresh list of investment opportunities for an agent."""
         return self.active_investment_portfolio.copy()
-    
+
     def _add_new_agent(self):
         """Helper method to add a single new agent to the model."""
-        
+
         empty_cells = [cell for cell in self.grid.all_cells.cells if cell.is_empty]
         if not empty_cells:
             return
 
         new_cell = self.random.choice(empty_cells)
-        
+
         Trader.create_agents(
             self,
             1,
@@ -253,7 +255,7 @@ class SugarscapeG1mt(mesa.Model):
         trader_shuffle = self.agents_by_type[Trader].shuffle()
         for agent in trader_shuffle:
             agent.step()
-        
+
         if self.agent_re_spawn:
             current_population = len(self.agents)
             self.deaths_this_step = self.initial_population - current_population
@@ -261,7 +263,7 @@ class SugarscapeG1mt(mesa.Model):
                 self._add_new_agent()
 
         self.datacollector.collect(self)
-        
+
         if self.db_logger is not None:
             latest_data = {
                 reporter: values[-1]
