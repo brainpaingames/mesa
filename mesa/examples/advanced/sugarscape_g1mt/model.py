@@ -11,6 +11,7 @@ from .database_logger import DatabaseLogger
 from .investment import InvestmentOpportunity
 from collections import defaultdict
 from .contracts import Contract, ContractStatus
+from dataclasses import asdict
 
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""
@@ -152,6 +153,7 @@ class SugarscapeG1mt(mesa.Model):
                 "Deaths": lambda m: getattr(m, 'deaths_this_step', 0),
                 "Active Loan Count": lambda m: sum(1 for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE),
                 "Total Loan Principal": lambda m: sum(c.principal for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE),
+                "Ledger": lambda m: m.get_ledger_snapshot(),
             },
         )
 
@@ -203,6 +205,28 @@ class SugarscapeG1mt(mesa.Model):
         self.contracts_by_agent[draft_contract.debtor_id].add(new_id)
         self.next_contract_id += 1
         return new_id
+
+    def update_contract_status(self, contract_id: int, new_status: ContractStatus):
+        """Safely updates a contract's status and cleans the index if it becomes inactive."""
+        if contract_id in self.contracts_by_id:
+            contract = self.contracts_by_id[contract_id]
+            contract.status = new_status
+
+            # If the contract is no longer active, remove it from the agent index
+            if new_status in [ContractStatus.REPAID, ContractStatus.DEFAULTED]:
+                self.contracts_by_agent[contract.creditor_id].discard(contract_id)
+                self.contracts_by_agent[contract.debtor_id].discard(contract_id)
+    
+    def get_ledger_snapshot(self) -> str:
+        """Serializes the current state of the contract book to a JSON string."""
+        serializable_ledger = {}
+        for contract_id, contract_obj in self.contracts_by_id.items():
+            # asdict converts dataclass to dict; we then handle non-serializable types
+            contract_dict = asdict(contract_obj)
+            contract_dict['contract_type'] = contract_dict['contract_type'].name
+            contract_dict['status'] = contract_dict['status'].name
+            serializable_ledger[contract_id] = contract_dict
+        return json.dumps(serializable_ledger)
 
     def _load_investment_portfolio(self):
         """Loads and builds the active investment portfolio from a JSON file."""

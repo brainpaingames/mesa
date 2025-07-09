@@ -2,8 +2,8 @@ import math
 import json 
 import inspect
 from mesa.discrete_space import CellAgent
-from .contracts import ContractType, ContractStatus
-
+from .contracts import Contract, ContractType, ContractStatus
+from .investment import SimulatedAgent
 
 def get_distance(cell_1, cell_2):
     """
@@ -48,6 +48,79 @@ class Trader(CellAgent):
         self.current_investment = None
         self.lender_vision = int(lender_vision)
         self.lender_look_ahead_horizon = int(lender_look_ahead_horizon)
+
+    def process_contract_maturities(self):
+        """
+        Handles accounting for any contracts that are due on the current step.
+        This method is non-discretionary.
+        """
+        my_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set()).copy()
+
+        for contract_id in my_contract_ids:
+            contract = self.model.contracts_by_id.get(contract_id)
+            if not contract or contract.status != ContractStatus.ACTIVE:
+                continue
+
+            if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == self.model.steps:
+                if contract.debtor_id == self.unique_id:
+                    amount_due = contract.total_repayment_amount
+                    payment = min(self.sugar, amount_due)
+                    
+                    self.sugar -= payment
+                    
+                    # Find the creditor to transfer funds
+                    creditor = self.model.schedule.agents[contract.creditor_id]
+                    creditor.sugar += payment
+
+                    if payment < amount_due:
+                        self.model.update_contract_status(contract_id, ContractStatus.DEFAULTED)
+                    else:
+                        self.model.update_contract_status(contract_id, ContractStatus.REPAID)
+
+    def accept_loan_proposal(self, draft_contract: Contract, borrower_reservation_amount: float) -> bool:
+        """
+        The lender's evaluation of a loan proposal. If accepted, the lender finalizes
+        the deal and registers the contract.
+        Returns True if the deal was made, False otherwise.
+        """
+        # --- Lender's Reservation Rate ---
+        lender_reservation_amount = 0.0 # V1: Lenders are willing to lend at zero interest
+
+        if borrower_reservation_amount < lender_reservation_amount:
+            return False # Borrower's max offer is less than my minimum demand
+
+        # --- Due Diligence on Borrower ---
+        borrower = self.model.schedule.agents[draft_contract.debtor_id]
+        borrower_cell_capacity = self.model.sugar_distribution[borrower.cell.coordinate]
+        if borrower_cell_capacity < 3:
+            return False # Borrower is in a poor area, too risky
+
+        # --- Surplus Calculation on Self (Lender) ---
+        sim_sugar = self.sugar
+        worst_case_harvest = 0
+        my_metabolism = self.get_capability("metabolism_sugar")
+        for _ in range(self.lender_look_ahead_horizon):
+            sim_sugar += worst_case_harvest
+            sim_sugar -= my_metabolism
+        surplus_sugar = max(0, sim_sugar)
+
+        if draft_contract.principal > surplus_sugar:
+            return False # I cannot afford to lend this much
+
+        # --- Finalize and Execute Deal ---
+        final_interest = (borrower_reservation_amount + lender_reservation_amount) / 2
+        
+        draft_contract.interest_schedule = [final_interest]
+        draft_contract.creditor_id = self.unique_id
+
+        # Transfer funds
+        self.sugar -= draft_contract.principal
+        borrower.sugar += draft_contract.principal
+
+        # Register the now-active contract
+        self.model.register_contract(draft_contract)
+        
+        return True
 
     def get_capability(self, key):
         """Public getter for a capability."""
