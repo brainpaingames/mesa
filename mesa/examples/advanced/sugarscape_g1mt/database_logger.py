@@ -43,7 +43,8 @@ class DatabaseLogger:
                     timestamp TEXT NOT NULL,
                     git_hash TEXT NOT NULL,
                     run_group TEXT,
-                    description TEXT
+                    description TEXT,
+                    tag TEXT
                 )
             """)
             cursor.execute("""
