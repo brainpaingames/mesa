@@ -72,6 +72,9 @@ def main(args):
             st.session_state.processed_agent_data = pd.concat(all_dfs, ignore_index=True)
             st.session_state.processed_run_ids = selected_ids
             st.session_state.playing = False # Reset playing state
+            # When new data is loaded, reset step to the new minimum
+            if not st.session_state.processed_agent_data.empty:
+                st.session_state.step = int(st.session_state.processed_agent_data['step'].min())
     
     if 'processed_agent_data' not in st.session_state or st.session_state.processed_agent_data.empty:
         st.error("No data to display.")
@@ -81,13 +84,13 @@ def main(args):
     min_step = int(agent_data['step'].min())
     max_step = int(agent_data['step'].max())
 
-    # Initialize step and playing state if they don't exist or are invalid
+    # Initialize or validate step and playing state.
+    if 'playing' not in st.session_state:
+        st.session_state.playing = False
     current_step = st.session_state.get('step', min_step)
     if not (min_step <= current_step <= max_step):
         st.session_state.step = min_step
-    if 'playing' not in st.session_state:
-        st.session_state.playing = False
-
+    
     col1, col2 = st.sidebar.columns(2)
     if col1.button("Play", use_container_width=True, key="play"):
         st.session_state.playing = True
@@ -99,10 +102,10 @@ def main(args):
         min_value=min_step, 
         max_value=max_step, 
         step=10,
-        value=st.session_state.step
+        value=st.session_state.get('step', min_step)
     )
     
-    if new_step != st.session_state.step:
+    if new_step != st.session_state.get('step', min_step):
         st.session_state.step = new_step
         st.session_state.playing = False
 
