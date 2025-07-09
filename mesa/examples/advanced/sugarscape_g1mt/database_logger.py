@@ -100,7 +100,7 @@ class DatabaseLogger:
         """Core logging method. Writes to DB and conditionally prints."""
         level_name = self.LEVEL_NAMES.get(level, "UNKNOWN")
         timestamp = datetime.datetime.now().isoformat()
-        
+
         # Always log to the database
         with self._get_connection() as conn:
             sql = "INSERT INTO logs (run_id, timestamp, level, message) VALUES (?, ?, ?, ?)"
@@ -114,7 +114,7 @@ class DatabaseLogger:
     # Public helper methods for convenience
     def debug(self, run_id, message):
         self._log(run_id, self.DEBUG, message)
-    
+
     def info(self, run_id, message):
         self._log(run_id, self.INFO, message)
 
@@ -131,8 +131,8 @@ class DatabaseLogger:
         """Creates a new run record and logs its parameters."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            sql = "INSERT INTO runs (timestamp, git_hash, run_group, description) VALUES (?, ?, ?, ?)"
-            values = (run_meta['timestamp'], run_meta['git_hash'], run_meta['run_group'], run_meta['description'])
+            sql = "INSERT INTO runs (timestamp, git_hash, run_group, description, tag) VALUES (?, ?, ?, ?, ?)"
+            values = (run_meta['timestamp'], run_meta['git_hash'], run_meta['run_group'], run_meta['description'], run_meta.get('tag', 'dev'))
             cursor.execute(sql, values)
             run_id = cursor.lastrowid
 
@@ -141,7 +141,7 @@ class DatabaseLogger:
 
             conn.commit()
             return run_id
-            
+
     def log_static_run_parameter(self, run_id, key, value):
         """Logs a single key-value parameter for a run, useful for static data."""
         with self._get_connection() as conn:
@@ -167,17 +167,17 @@ class DatabaseLogger:
                 for key, value in attributes.items():
                     if value is not None:
                         agent_data_to_log.append((run_id, step, agent.unique_id, key, value))
-            
+
             cursor.executemany("INSERT INTO agent_data (run_id, step, agent_id, attribute_name, attribute_value) VALUES (?, ?, ?, ?, ?)", agent_data_to_log)
             conn.commit()
-            
+
     def log_spatial_layer(self, run_id: int, step: int, layer_name: str, layer_data_array):
         """Logs a full 2D spatial layer for a single step."""
         with self._get_connection() as conn:
             # Convert numpy array to native Python list for JSON serialization
             layer_data_list = layer_data_array.tolist()
             layer_data_json = json.dumps(layer_data_list)
-            
+
             sql = "INSERT INTO spatial_data (run_id, step, layer_name, layer_data) VALUES (?, ?, ?, ?)"
             conn.execute(sql, (run_id, step, layer_name, layer_data_json))
             conn.commit()
