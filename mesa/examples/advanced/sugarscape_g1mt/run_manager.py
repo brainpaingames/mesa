@@ -14,12 +14,12 @@ class RunManager:
         """Delete a run by ID and all related data."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
             cursor.execute("DELETE FROM run_parameters WHERE run_id = ?", (run_id,))
             cursor.execute("DELETE FROM model_results WHERE run_id = ?", (run_id,))
             cursor.execute("DELETE FROM agent_data WHERE run_id = ?", (run_id,))
             cursor.execute("DELETE FROM logs WHERE run_id = ?", (run_id,))
             cursor.execute("DELETE FROM spatial_data WHERE run_id = ?", (run_id,))
+            cursor.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
             conn.commit()
             print(f"Run {run_id} and all related data have been deleted.")
 
@@ -27,12 +27,12 @@ class RunManager:
         """Delete runs with IDs less than a given number."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM runs WHERE run_id < ?", (run_id,))
             cursor.execute("DELETE FROM run_parameters WHERE run_id < ?", (run_id,))
             cursor.execute("DELETE FROM model_results WHERE run_id < ?", (run_id,))
             cursor.execute("DELETE FROM agent_data WHERE run_id < ?", (run_id,))
             cursor.execute("DELETE FROM logs WHERE run_id < ?", (run_id,))
             cursor.execute("DELETE FROM spatial_data WHERE run_id < ?", (run_id,))
+            cursor.execute("DELETE FROM runs WHERE run_id < ?", (run_id,))
             conn.commit()
             print(f"All runs with IDs less than {run_id} and all related data have been deleted.")
 
@@ -40,12 +40,12 @@ class RunManager:
         """Delete runs whose run_group contains a given string."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM runs WHERE run_group LIKE ?", ('%' + group_string + '%',))
             cursor.execute("DELETE FROM run_parameters WHERE run_id IN (SELECT run_id FROM runs WHERE run_group LIKE ?)", ('%' + group_string + '%',))
             cursor.execute("DELETE FROM model_results WHERE run_id IN (SELECT run_id FROM runs WHERE run_group LIKE ?)", ('%' + group_string + '%',))
             cursor.execute("DELETE FROM agent_data WHERE run_id IN (SELECT run_id FROM runs WHERE run_group LIKE ?)", ('%' + group_string + '%',))
             cursor.execute("DELETE FROM logs WHERE run_id IN (SELECT run_id FROM runs WHERE run_group LIKE ?)", ('%' + group_string + '%',))
             cursor.execute("DELETE FROM spatial_data WHERE run_id IN (SELECT run_id FROM runs WHERE run_group LIKE ?)", ('%' + group_string + '%',))
+            cursor.execute("DELETE FROM runs WHERE run_group LIKE ?", ('%' + group_string + '%',))
             conn.commit()
             print(f"All runs with run_group containing '{group_string}' and all related data have been deleted.")
 
