@@ -3,7 +3,6 @@ import json
 import inspect
 from mesa.discrete_space import CellAgent
 
-
 def get_distance(cell_1, cell_2):
     """
     Calculate the Euclidean distance between two positions.
@@ -23,10 +22,7 @@ class Trader(CellAgent):
     - Harvests sugar to survive.
     - Can invest sugar to permanently reduce metabolism.
     """
-
-# sugarscape_g1mt/agents.py
-
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lender_vision=7, lender_look_ahead_horizon=20):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
@@ -47,6 +43,8 @@ class Trader(CellAgent):
         self.is_investing = False
         self.investment_counter = 0
         self.current_investment = None
+        self.lender_vision = int(lender_vision)
+        self.lender_look_ahead_horizon = int(lender_look_ahead_horizon)
 
     def get_capability(self, key):
         """Public getter for a capability."""
