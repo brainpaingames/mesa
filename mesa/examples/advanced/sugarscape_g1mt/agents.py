@@ -1,5 +1,5 @@
 import math
-import json 
+import json
 import inspect
 from mesa.discrete_space import CellAgent
 from .contracts import Contract, ContractType, ContractStatus
@@ -68,8 +68,7 @@ class Trader(CellAgent):
                     
                     self.sugar -= payment
                     
-                    # Find the creditor to transfer funds
-                    creditor = self.model.schedule.agents[contract.creditor_id]
+                    creditor = self.model.schedule.agents_by_id[contract.creditor_id]
                     creditor.sugar += payment
 
                     if payment < amount_due:
@@ -77,25 +76,21 @@ class Trader(CellAgent):
                     else:
                         self.model.update_contract_status(contract_id, ContractStatus.REPAID)
 
-    def accept_loan_proposal(self, draft_contract: Contract, borrower_reservation_amount: float) -> bool:
+    def get_lending_offer(self, draft_contract: Contract, borrower_reservation_amount: float) -> float | None:
         """
-        The lender's evaluation of a loan proposal. If accepted, the lender finalizes
-        the deal and registers the contract.
-        Returns True if the deal was made, False otherwise.
+        The lender's passive evaluation of a loan proposal.
+        Returns its own reservation amount (0.0) if acceptable, otherwise None.
         """
-        # --- Lender's Reservation Rate ---
-        lender_reservation_amount = 0.0 # V1: Lenders are willing to lend at zero interest
+        lender_reservation_amount = 0.0
 
         if borrower_reservation_amount < lender_reservation_amount:
-            return False # Borrower's max offer is less than my minimum demand
+            return None
 
-        # --- Due Diligence on Borrower ---
-        borrower = self.model.schedule.agents[draft_contract.debtor_id]
+        borrower = self.model.schedule.agents_by_id[draft_contract.debtor_id]
         borrower_cell_capacity = self.model.sugar_distribution[borrower.cell.coordinate]
         if borrower_cell_capacity < 3:
-            return False # Borrower is in a poor area, too risky
+            return None
 
-        # --- Surplus Calculation on Self (Lender) ---
         sim_sugar = self.sugar
         worst_case_harvest = 0
         my_metabolism = self.get_capability("metabolism_sugar")
@@ -105,22 +100,9 @@ class Trader(CellAgent):
         surplus_sugar = max(0, sim_sugar)
 
         if draft_contract.principal > surplus_sugar:
-            return False # I cannot afford to lend this much
+            return None
 
-        # --- Finalize and Execute Deal ---
-        final_interest = (borrower_reservation_amount + lender_reservation_amount) / 2
-        
-        draft_contract.interest_schedule = [final_interest]
-        draft_contract.creditor_id = self.unique_id
-
-        # Transfer funds
-        self.sugar -= draft_contract.principal
-        borrower.sugar += draft_contract.principal
-
-        # Register the now-active contract
-        self.model.register_contract(draft_contract)
-        
-        return True
+        return lender_reservation_amount
 
     def get_capability(self, key):
         """Public getter for a capability."""
@@ -138,7 +120,6 @@ class Trader(CellAgent):
             caller_class = "N/A"
 
         old_value = self._capabilities_DO_NOT_TOUCH.get(key)
-        # Convert numpy types to native Python types for JSON serialization
         if hasattr(old_value, 'item'): old_value = old_value.item()
         if hasattr(value, 'item'): value = value.item()
 
