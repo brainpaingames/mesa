@@ -21,16 +21,22 @@ class InvestmentOpportunity:
         required_prerequisites = set(self.requirements.get("prerequisites", []))
         return required_prerequisites.issubset(agent.completed_investment_names)
 
-    def calculate_utility(self, agent, horizon):
+    def calculate_utility(self, agent, horizon, hypothetical_loan=None):
         """
         Calculates the forecasted utility (final sugar) of undertaking this investment.
         Returns a tuple of (utility, is_death).
         """
-        sim_agent = SimulatedAgent(agent)
+        if isinstance(agent, SimulatedAgent):
+            sim_agent = agent
+        else:
+            sim_agent = SimulatedAgent(agent)
         
         # Get the agent's current contracts for the simulation
         agent_contract_ids = sim_agent.real_agent.model.contracts_by_agent.get(sim_agent.real_agent.unique_id, set())
         agent_contracts = [sim_agent.real_agent.model.contracts_by_id[cid] for cid in agent_contract_ids if sim_agent.real_agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
+
+        if hypothetical_loan:
+            agent_contracts.append(hypothetical_loan)
 
         # 1. Simulate survival during the investment period
         cost_duration = self.cost["duration"]

@@ -1,5 +1,5 @@
 import math
-import json
+import json 
 import inspect
 from mesa.discrete_space import CellAgent
 from .contracts import Contract, ContractType, ContractStatus
@@ -214,14 +214,12 @@ class Trader(CellAgent):
 
         for i in range(horizon):
             current_sim_step = self.model.steps + 1 + i
-            # --- Ledger-Aware Cash Flow Projection ---
             for contract in agent_contracts:
                 if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
                     if contract.creditor_id == self.unique_id:
                         sim_sugar += contract.total_repayment_amount
                     elif contract.debtor_id == self.unique_id:
                         sim_sugar -= contract.total_repayment_amount
-            # --- End Ledger-Aware ---
 
             sim_sugar += expected_harvest
             sim_sugar -= metabolism
@@ -229,8 +227,21 @@ class Trader(CellAgent):
                 return -1, True
         return sim_sugar, False
 
+    def _calculate_utility_with_hypothetical_loan(self, investment_opp, loan: Contract | None):
+        """Helper to simulate utility given a specific loan agreement (or None)."""
+        horizon = self.get_capability('agent_look_ahead_horizon')
+        
+        sim_agent = SimulatedAgent(self)
+        if loan:
+            sim_agent.sugar += loan.principal
+        
+        # Pass the hypothetical loan to the utility calculation
+        return investment_opp.calculate_utility(sim_agent, horizon, hypothetical_loan=loan)
+
     def step(self):
         """Main step logic for the agent."""
+        self.process_contract_maturities()
+
         if self.is_investing:
             self.investment_counter -= 1
             if self.investment_counter <= 0:
@@ -239,40 +250,96 @@ class Trader(CellAgent):
                 self.is_investing = False
                 self.current_investment = None
         else:
-            # --- Agent Decision Logic ---
             horizon = self.get_capability('agent_look_ahead_horizon')
-
-            # 1. Evaluate the status quo (foraging)
-            forage_utility, forage_death = self.simulate_forage_scenario(horizon)
             
-            best_utility = forage_utility
-            best_is_death = forage_death
-            chosen_action = ("FORAGE", None)
+            forage_utility, forage_death = self.simulate_forage_scenario(horizon)
+            if forage_death: forage_utility = -1
+            
+            candidate_actions = [(forage_utility, ("FORAGE", None))]
 
             if self.investments_enabled:
-                # 2. Evaluate all available investment opportunities
                 for opp in self.available_opportunities:
-                    if opp.is_available(self):
-                        invest_utility, invest_death = opp.calculate_utility(self, horizon)
-                        
-                        # Prioritize survival, then highest utility
-                        if best_is_death and not invest_death:
-                            best_utility = invest_utility
-                            best_is_death = invest_death
-                            chosen_action = ("INVEST", opp)
-                        elif not best_is_death and not invest_death:
-                            if invest_utility > best_utility:
-                                best_utility = invest_utility
-                                chosen_action = ("INVEST", opp)
+                    if not opp.is_available(self):
+                        continue
 
-            # 3. Execute the chosen action
-            action_type, investment_opp = chosen_action
+                    utility, is_death = opp.calculate_utility(self, horizon)
+
+                    if not is_death:
+                        # Agent can afford to invest on its own
+                        candidate_actions.append((utility, ("INVEST", opp)))
+                    else:
+                        # Agent cannot afford to invest, must consider a loan
+                        # How much sugar would the agent need to survive the investment?
+                        survival_cost = opp.cost["metabolism_during_investment"] * (opp.cost["duration"] + 1)
+                        shortfall = max(0, survival_cost - self.sugar)
+                        amount_needed = shortfall # For V1, borrow just enough to survive
+                        
+                        if amount_needed <= 0:
+                            continue
+
+                        utility_zero_interest, death_zero_interest = self._calculate_utility_with_hypothetical_loan(opp, None)
+                        if death_zero_interest: continue
+
+                        reservation_amount = max(0, utility_zero_interest - forage_utility)
+                        if reservation_amount <= 0: continue
+                        
+                        neighbors = [n for n in self.cell.get_neighborhood(self.lender_vision) if not n.is_empty and n != self]
+                        self.random.shuffle(neighbors)
+
+                        for lender in neighbors:
+                            term = opp.cost["duration"] + 10
+                            draft_contract = Contract(
+                                contract_type=ContractType.TERM_LOAN, creditor_id=-1,
+                                debtor_id=self.unique_id, principal=amount_needed,
+                                term_steps=term, issue_step=self.model.steps
+                            )
+                            lender_offer = lender.get_lending_offer(draft_contract, reservation_amount)
+
+                            if lender_offer is not None:
+                                final_interest = (reservation_amount + lender_offer) / 2
+                                hypothetical_loan = Contract(
+                                    contract_type=ContractType.TERM_LOAN, creditor_id=lender.unique_id,
+                                    debtor_id=self.unique_id, principal=amount_needed,
+                                    term_steps=term, issue_step=self.model.steps, interest_schedule=[final_interest]
+                                )
+                                final_utility, final_death = self._calculate_utility_with_hypothetical_loan(opp, hypothetical_loan)
+                                
+                                if not final_death:
+                                    candidate_actions.append((final_utility, ("INVEST_WITH_LOAN", opp, lender, amount_needed, final_interest)))
+            
+            candidate_actions.sort(key=lambda x: x[0], reverse=True)
+            best_utility, best_action_data = candidate_actions[0]
+
+            action_type = best_action_data[0]
+            
             if action_type == "INVEST":
+                _, investment_opp = best_action_data
                 self.is_investing = True
                 self.current_investment = investment_opp
                 self.investment_counter = investment_opp.cost["duration"]
                 self.set_capability("metabolism_sugar", investment_opp.cost["metabolism_during_investment"])
                 self.available_opportunities.remove(investment_opp)
+
+            elif action_type == "INVEST_WITH_LOAN":
+                _, investment_opp, lender, amount_needed, final_interest = best_action_data
+                
+                term = investment_opp.cost["duration"] + 10
+                final_contract = Contract(
+                    contract_type=ContractType.TERM_LOAN, creditor_id=lender.unique_id,
+                    debtor_id=self.unique_id, principal=amount_needed,
+                    term_steps=term, issue_step=self.model.steps,
+                    interest_schedule=[final_interest]
+                )
+                lender.sugar -= amount_needed
+                self.sugar += amount_needed
+                self.model.register_contract(final_contract)
+                
+                self.is_investing = True
+                self.current_investment = investment_opp
+                self.investment_counter = investment_opp.cost["duration"]
+                self.set_capability("metabolism_sugar", investment_opp.cost["metabolism_during_investment"])
+                self.available_opportunities.remove(investment_opp)
+
             else: # FORAGE
                 self.move()
                 self.eat()
