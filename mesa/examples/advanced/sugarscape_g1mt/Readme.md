@@ -82,6 +82,37 @@ The `pytest` suite runs a full simulation and asserts that the results fall with
     pytest sugarscape_g1mt
     ```
 
+## Run Manager
+
+The `run_manager.py` script provides a command-line interface for managing runs in the database. It allows you to:
+
+1. Delete individual runs by ID.
+2. Delete runs with IDs smaller than a given number.
+3. Delete runs whose `run_group` contains a given string.
+4. Tag individual runs with "dev", "test", or "prod".
+
+### Usage
+
+1. **Delete a run by ID:**
+   ```bash
+   python run_manager.py delete_run <run_id>
+   ```
+
+2. **Delete runs with IDs less than a given number:**
+   ```bash
+   python run_manager.py delete_less_than <run_id>
+   ```
+
+3. **Delete runs whose `run_group` contains a given string:**
+   ```bash
+   python run_manager.py delete_by_group <group_string>
+   ```
+
+4. **Tag a run with 'dev', 'test', or 'prod':**
+   ```bash
+   python run_manager.py tag_run <run_id> <tag>
+   ```
+
 ## Project Structure
 
 ```
@@ -151,4 +182,4 @@ All development MUST proceed in two distinct, sequential phases. You are FORBIDD
 Your goal is the cleanest possible `git diff`. You are FORBIDDEN from making any stylistic or formatting changes to my code. This includes whitespace, comments, line breaks, and variable names. Preserve the existing project style perfectly.
 
 **4. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
-You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.
+You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.````

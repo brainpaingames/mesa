@@ -33,6 +33,7 @@ def run_batch():
         "investment_json_path": "sugarscape_g1mt/investments.json",
         "log_agent_data": False,
         "seed": 42,
+        "tag": "dev",  # Default tag
     }
 
     # --- 2. Set up Argument Parser ---
@@ -51,7 +52,7 @@ def run_batch():
     # --- 3. Separate Fixed vs. Varying Parameters ---
     param_space = {}
     cli_args = vars(args)
-    
+
     for key, value in cli_args.items():
         if key in DEFAULT_PARAMS:
             is_list_of_lists = isinstance(value, list) and len(value) > 0 and isinstance(value[0], list)
@@ -59,7 +60,7 @@ def run_batch():
 
             if is_list_of_lists or is_simple_list_for_sweep:
                 param_space[key] = value
-    
+
     final_fixed_params = DEFAULT_PARAMS.copy()
     for key, value in cli_args.items():
         if key in DEFAULT_PARAMS and key not in param_space:
@@ -67,13 +68,13 @@ def run_batch():
 
     # --- 4. Generate and Run Simulations ---
     logger = DatabaseLogger(print_level=DatabaseLogger.INFO, db_path=args.db)
-    
+
     if not param_space:
         param_combinations = [{}] 
     else:
         keys, values = zip(*param_space.items())
         param_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
-    
+
     total_runs = len(param_combinations) * args.replications
     run_counter = 0
 
@@ -87,9 +88,9 @@ def run_batch():
     for i in range(args.replications):
         for combo_params in param_combinations:
             run_counter += 1
-            
+
             run_params = {**final_fixed_params, **combo_params}
-            
+
             # --- 5. Expand Ranged Params to Model Params ---
             ranged_params_map = {"endowment": "endowment", "metabolism": "metabolism", "vision": "vision", "age": "agent_age"}
             for key, base_name in ranged_params_map.items():
@@ -104,19 +105,18 @@ def run_batch():
                 if 'seed' not in combo_params: # Don't override if seed is being swept
                     run_params['seed'] = i
                 description = f"Rep {i+1}: {description}" if description else f"Rep {i+1}"
-            
+
             # If seed is passed as a main arg, let it override replicator seed
             if 'seed' in cli_args and cli_args['seed'] is not None:
                 run_params['seed'] = cli_args['seed']
 
-
             run_meta = { "timestamp": datetime.datetime.now().isoformat(), "git_hash": git_hash,
-                         "run_group": args.run_group, "description": description }
+                         "run_group": args.run_group, "description": description, "tag": args.tag }
 
             run_id = logger.create_new_run(run_meta, run_params)
-            
+
             logger.info(run_id, f"--- Running model {run_counter}/{total_runs}: {description} ---")
-            
+
             model_init_params = run_params.copy()
             model_init_params.update({"db_logger": logger, "run_id": run_id})
 

@@ -97,3 +97,4 @@ mesa/visualization/templates/js/external/
 
 *.db
 *.sqbpro
+.aider*
