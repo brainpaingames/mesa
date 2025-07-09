@@ -2,6 +2,8 @@ import math
 import json 
 import inspect
 from mesa.discrete_space import CellAgent
+from .contracts import ContractType, ContractStatus
+
 
 def get_distance(cell_1, cell_2):
     """
@@ -22,6 +24,7 @@ class Trader(CellAgent):
     - Harvests sugar to survive.
     - Can invest sugar to permanently reduce metabolism.
     """
+
     def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lender_vision=7, lender_look_ahead_horizon=20):
         super().__init__(model)
         self.cell = cell
@@ -151,8 +154,21 @@ class Trader(CellAgent):
         sim_sugar = self.sugar
         expected_harvest = self.get_max_potential_harvest()
         metabolism = self.get_capability("metabolism_sugar")
+        
+        agent_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set())
+        agent_contracts = [self.model.contracts_by_id[cid] for cid in agent_contract_ids if self.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
 
-        for _ in range(horizon):
+        for i in range(horizon):
+            current_sim_step = self.model.steps + 1 + i
+            # --- Ledger-Aware Cash Flow Projection ---
+            for contract in agent_contracts:
+                if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
+                    if contract.creditor_id == self.unique_id:
+                        sim_sugar += contract.total_repayment_amount
+                    elif contract.debtor_id == self.unique_id:
+                        sim_sugar -= contract.total_repayment_amount
+            # --- End Ledger-Aware ---
+
             sim_sugar += expected_harvest
             sim_sugar -= metabolism
             if sim_sugar <= 0:

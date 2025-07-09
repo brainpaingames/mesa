@@ -1,5 +1,6 @@
 import math
 import copy
+from .contracts import ContractType, ContractStatus
 
 class InvestmentOpportunity:
     """
@@ -27,12 +28,26 @@ class InvestmentOpportunity:
         """
         sim_agent = SimulatedAgent(agent)
         
+        # Get the agent's current contracts for the simulation
+        agent_contract_ids = sim_agent.real_agent.model.contracts_by_agent.get(sim_agent.real_agent.unique_id, set())
+        agent_contracts = [sim_agent.real_agent.model.contracts_by_id[cid] for cid in agent_contract_ids if sim_agent.real_agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
+
         # 1. Simulate survival during the investment period
         cost_duration = self.cost["duration"]
         # The agent must survive the investment period AND the step it completes
         metabolism_cost_steps = cost_duration + 1
         
-        for _ in range(metabolism_cost_steps):
+        for i in range(metabolism_cost_steps):
+            current_sim_step = sim_agent.real_agent.model.steps + 1 + i
+            # --- Ledger-Aware Cash Flow Projection ---
+            for contract in agent_contracts:
+                if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
+                    if contract.creditor_id == sim_agent.real_agent.unique_id:
+                        sim_agent.sugar += contract.total_repayment_amount
+                    elif contract.debtor_id == sim_agent.real_agent.unique_id:
+                        sim_agent.sugar -= contract.total_repayment_amount
+            # --- End Ledger-Aware ---
+
             sim_agent.sugar -= self.cost["metabolism_during_investment"]
             if sim_agent.sugar <= 0:
                 return -1, True # Agent dies during investment
@@ -45,7 +60,17 @@ class InvestmentOpportunity:
             expected_harvest = sim_agent.get_max_potential_harvest()
             metabolism = sim_agent.get_capability("metabolism_sugar")
             
-            for _ in range(remaining_horizon):
+            for i in range(remaining_horizon):
+                current_sim_step = sim_agent.real_agent.model.steps + 1 + metabolism_cost_steps + i
+                # --- Ledger-Aware Cash Flow Projection ---
+                for contract in agent_contracts:
+                    if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
+                        if contract.creditor_id == sim_agent.real_agent.unique_id:
+                            sim_agent.sugar += contract.total_repayment_amount
+                        elif contract.debtor_id == sim_agent.real_agent.unique_id:
+                            sim_agent.sugar -= contract.total_repayment_amount
+                # --- End Ledger-Aware ---
+
                 sim_agent.sugar += expected_harvest
                 sim_agent.sugar -= metabolism
                 if sim_agent.sugar <= 0:
