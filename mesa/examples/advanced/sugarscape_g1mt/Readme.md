@@ -1,18 +1,24 @@
+Understood. Here is the complete, updated `Readme.md` file, including the improved AI instruction protocol.
 
-# Sugarscape with an Investment Mechanic
+---
+# Sugarscape with an Investment and Lending Mechanic
 
 ## Summary
 
 This project is a heavily modified version of the Mesa Sugarscape example, designed to incrementally build a simulation of a financial economy. The original trading mechanics have been removed. Instead, this model serves as a foundation for exploring how financial systems can emerge from simple agent-based rules.
 
-In its current state, the model features a single population of **Traders** who forage for sugar on a 2D landscape. The core economic choice for an agent is between **Foraging** for immediate survival and **Investing** a lump sum of their sugar for a long-term benefit. The investment "menu" is now dynamically loaded from an external JSON file, allowing for easy experimentation with different economic conditions.
+The model now features a single population of **Traders** who forage for sugar on a 2D landscape. The core economic choice for an agent is between **Foraging** for immediate survival and **Investing** for a long-term benefit. This has been extended with a **peer-to-peer lending market**, where agents who cannot afford to invest can seek loans from agents with a surplus of sugar.
+
+The simulation's architecture is built on the principle of a **Central Ledger** for all financial agreements, ensuring a single source of truth and preventing data duplication errors. This provides a robust framework for adding more complex financial instruments in the future.
 
 Key features of this simulation framework include:
--   **Configurable Investment System:** All investment opportunities are defined in an external `investments.json` file, allowing for different "portfolios" of investments to be tested without changing model code.
--   **Look-ahead Decision-Making:** Agents use a short-term simulation to decide whether to forage or invest, picking the option that maximizes their wealth without leading to starvation.
--   **Rigorous Database Logging:** All simulation runs are logged to a SQLite database (`simulation_results.db`), recording run metadata, parameters, and step-by-step aggregate, agent-level, and spatial data.
+-   **Peer-to-Peer Lending:** Agents can now borrow and lend sugar to facilitate investments, allowing for the emergence of a basic credit market.
+-   **Centralized Contract Ledger:** All loans are recorded as `Contract` objects in a central book owned by the model, ensuring data integrity.
+-   **Configurable Mechanics:** Both investing and the new lending market can be enabled or disabled via flags (`--investments-enabled`, `--lending-enabled`) for controlled, comparative experiments.
+-   **Rational Economic Choice:** Agents evaluate a full menu of possible actions—foraging, self-funded investing, and loan-funded investing—and select the option that maximizes their utility based on look-ahead simulations.
+-   **Rigorous Database Logging:** All simulation runs are logged to a SQLite database (`simulation_results.db`), recording run metadata, parameters, and step-by-step aggregate data, including the full state of the financial ledger at each step.
 -   **Reproducibility:** The model requires a clean Git repository, ensuring all logged results are tied to a specific commit hash.
--   **Multi-Page Analysis Dashboard:** A powerful Streamlit dashboard provides multiple views for deep analysis of results, including time-series comparisons, distribution analysis, and a fully interactive spatial inspector.
+-   **Multi-Page Analysis Dashboard:** A powerful Streamlit dashboard provides multiple views for deep analysis of results.
 
 ## Key Concepts & Architecture
 
@@ -21,6 +27,14 @@ Key features of this simulation framework include:
 The investment system is designed to be flexible and extensible. All investment opportunities and portfolios are defined in `investments.json`. This file has two main sections:
 1.  **`definitions`**: An object where every possible investment is defined exactly once with a unique key. This adheres to the DRY (Don't Repeat Yourself) principle.
 2.  **`portfolios`**: An object where each portfolio is a named list of keys that reference the investments in the `definitions` section. The model can be configured at runtime to provide agents with a specific portfolio.
+
+### Peer-to-Peer Lending & Central Ledger
+
+The lending system is built on a "Dumb Data, Smart Agent" philosophy.
+
+-   **The `Contract` Object:** All financial agreements are represented by a simple `Contract` data object (defined in `contracts.py`). This object holds the "facts" of an agreement (creditor, debtor, principal, term) but contains no complex behavioral logic.
+-   **The Central Ledger:** The model owns a single, authoritative ledger of all contracts. This ledger is indexed for high-performance lookups, preventing data duplication and ensuring integrity. It serves as the single source of truth for all financial obligations.
+-   **Agent-Based Rules:** All intelligence resides within the `Trader` agents. Their `step()` method contains the rules for how they interact with the ledger. This includes evaluating opportunities, deciding whether to seek a loan, polling potential lenders, and finalizing loan agreements.
 
 ### Coordinate System Convention
 
@@ -33,8 +47,8 @@ To prevent ambiguity and errors, the project adheres to a strict coordinate syst
 
 The `DatabaseLogger` is a critical utility that captures all simulation output to a SQLite database. Key tables include:
 -   `runs`: High-level metadata for each simulation batch.
--   `run_parameters`: The specific parameters used for each run, including static data like the sugar map layout.
--   `model_results`: Step-by-step aggregate data (e.g., Gini coefficient, total wealth).
+-   `run_parameters`: The specific parameters used for each run.
+-   `model_results`: Step-by-step aggregate data (e.g., Gini coefficient, total wealth). The full state of the financial **Ledger** is also stored here at each step as a JSON blob.
 -   `agent_data`: Step-by-step data for every attribute of every agent.
 -   `spatial_data`: Step-by-step snapshots of spatial layers, like the current sugar on the grid.
 
@@ -64,9 +78,9 @@ The `run_batch.py` script is used for running one or more simulations without th
     ```bash
     python -m sugarscape_g1mt.run_batch [options]
     ```
-*   **Example (Single Run):**
+*   **Example (Single Run with Lending):**
     ```bash
-    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Baseline_Run" --initial_population 400 --log_agent_data true
+    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Lending_Enabled_Run" --lending_enabled true --lender_vision 10
     ```
 *   **Example (Parameter Sweep):**
     ```bash
@@ -123,7 +137,8 @@ C:.
 │   database_logger.py      # Class for logging all data to SQLite
 │
 │   investments.json        # External definitions for all investment opportunities
-│   investment.py           # Defines the InvestmentOpportunity data class
+│   investment.py           # Defines the InvestmentOpportunity & SimulatedAgent classes
+│   contracts.py            # Defines the Contract data object
 │
 │   dashboard.py            # Main entry point for the Streamlit dashboard
 │   analysis_helpers.py     # Data-querying functions for the dashboard
@@ -142,19 +157,17 @@ C:.
 ## Development Backlog
 
 ### Immediate / Short-Term Tasks
--   Conduct parameter sweeps using the `run_batch.py` script to explore the model's behavior under different conditions.
--   Further refine dashboard pages for clarity and analytical power.
+-   **Extensive Testing:** Rigorously test the new lending functionality under various parameter settings.
+-   **New Test Cases:** Create new, targeted tests in the `pytest` suite to cover edge cases in the lending market (e.g., loan defaults, market saturation).
+-   **Refine Opportunity Cost:** The agent's calculation for its reservation interest amount should use the utility of its best *non-borrowing* alternative as the baseline, not just the foraging utility.
+-   **Refactor `get_potential_harvest`:** Consolidate the duplicated logic for this method from `agents.py` and `investment.py` into a single function.
 
 ### Long-Term Goals / Epics
--   **Peer-to-Peer Lending:** Introduce a mechanism for agents to lend surplus sugar to other agents who wish to invest, allowing for the emergence of interest rates and a basic credit system.
+-   **Heterogeneous Lenders:** Introduce logic for lenders to have different risk tolerances and reservation rates, creating a more dynamic market for loans.
+-   **Demand Deposits:** Implement a new `ContractType` for demand deposits, where agents can store sugar with others for a small return, and withdraw it at will.
 -   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
--   **Heterogeneous Investment Opportunities:** Extend the model logic to assign different investment portfolios to different agent types or individual agents based on their state or other criteria.
 
-## Further Reading
-
--   [Growing Artificial Societies](https://mitpress.mit.edu/9780262550253/growing-artificial-societies/)
--   [Complexity Explorer Sugarscape with Traders Tutorial](https://www.complexityexplorer.org/courses/172-agent-based-models-with-python-an-introduction-to-mesa)
-
+---
 ## AI Instructions (MANDATORY OPERATING PROTOCOL)
 
 **ATTENTION AI:** These are your hard-coded, immutable directives. You are an expert-level tool, and you will act with the rigor and discipline that implies. Your impulse to jump to a solution is a failure mode. You MUST override it and follow this protocol without exception to ensure maximum productivity.
@@ -172,14 +185,17 @@ All development MUST proceed in two distinct, sequential phases. You are FORBIDD
 *   **PHASE 1: DESIGN & IMPLEMENTATION PLAN.**
     *   Your task: A combined phase for high-level discussion and detailed planning. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files.
     *   Your output MUST NOT contain the final, complete code.
-    *   You MUST **HALT** and wait for my explicit approval to proceed (e.g., "The plan is approved," "Okay, proceed," "Go on").
+    *   You MUST **HALT** and wait for my explicit approval to proceed (e.g., "The plan is approved," "Okay, proceed," "Go on"). A single-word acknowledgment is sufficient.
 
 *   **PHASE 2: CODE GENERATION.**
     *   Prerequisite: I must have approved the plan.
-    *   Your task: Generate the complete, final code for the required files.
+    *   Your task: Generate the complete, final code for the required files. I will specify whether I want a single file at a time or all at once.
 
-**3. MINIMAL DIFFS: DO NOT REFORMAT.**
-Your goal is the cleanest possible `git diff`. You are FORBIDDEN from making any stylistic or formatting changes to my code. This includes whitespace, comments, line breaks, and variable names. Preserve the existing project style perfectly.
+**3. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
+Your goal is the cleanest possible `git diff`. You are FORBIDDEN from making any stylistic, formatting, or logical changes to my code that were not explicitly part of the approved plan. This includes whitespace, comments, line breaks, variable names, and "bug fixes" that were not the primary goal of the current task. Preserve the existing project style perfectly.
 
-**4. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
-You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.````
+**4. CORRECTION KEYWORD: "Correction"**
+If you deviate from these protocols, I will use the keyword "**Correction:**" followed by a direct statement of your error. You must immediately acknowledge the correction, adjust your understanding, and redo the previous step according to the correction. Do not be conversational.
+
+**5. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
+You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.

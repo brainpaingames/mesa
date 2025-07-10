@@ -25,7 +25,7 @@ class Trader(CellAgent):
     - Can invest sugar to permanently reduce metabolism.
     """
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lender_vision=7, lender_look_ahead_horizon=20):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, lender_vision=7, lender_look_ahead_horizon=20):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
@@ -41,6 +41,7 @@ class Trader(CellAgent):
             "agent_look_ahead_horizon": int(agent_look_ahead_horizon)
         }
         self.investments_enabled = investments_enabled
+        self.lending_enabled = lending_enabled
         self.available_opportunities = opportunities.copy() if opportunities is not None else []
         self.completed_investment_names = set()
         self.is_investing = False
@@ -235,7 +236,6 @@ class Trader(CellAgent):
         if loan:
             sim_agent.sugar += loan.principal
         
-        # Pass the hypothetical loan to the utility calculation
         return investment_opp.calculate_utility(sim_agent, horizon, hypothetical_loan=loan)
 
     def step(self):
@@ -265,14 +265,12 @@ class Trader(CellAgent):
                     utility, is_death = opp.calculate_utility(self, horizon)
 
                     if not is_death:
-                        # Agent can afford to invest on its own
                         candidate_actions.append((utility, ("INVEST", opp)))
-                    else:
+                    elif self.lending_enabled:
                         # Agent cannot afford to invest, must consider a loan
-                        # How much sugar would the agent need to survive the investment?
                         survival_cost = opp.cost["metabolism_during_investment"] * (opp.cost["duration"] + 1)
                         shortfall = max(0, survival_cost - self.sugar)
-                        amount_needed = shortfall # For V1, borrow just enough to survive
+                        amount_needed = shortfall
                         
                         if amount_needed <= 0:
                             continue

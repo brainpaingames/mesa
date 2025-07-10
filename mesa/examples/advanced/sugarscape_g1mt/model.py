@@ -47,6 +47,7 @@ class SugarscapeG1mt(mesa.Model):
         agent_re_spawn=True,
         sugar_regrowth_rate=1.0,
         investments_enabled=True,
+        lending_enabled=True,
         investment_portfolio_name="default",
         investment_json_path="sugarscape_g1mt/investments.json",
         endowment_min=25,
@@ -100,6 +101,7 @@ class SugarscapeG1mt(mesa.Model):
                 "agent_re_spawn": int(agent_re_spawn),
                 "sugar_regrowth_rate": sugar_regrowth_rate,
                 "investments_enabled": int(investments_enabled),
+                "lending_enabled": int(lending_enabled),
                 "investment_portfolio_name": investment_portfolio_name,
                 "investment_json_path": investment_json_path,
                 "endowment_min": endowment_min, "endowment_max": endowment_max,
@@ -121,6 +123,7 @@ class SugarscapeG1mt(mesa.Model):
         self.agent_re_spawn = agent_re_spawn
         self.sugar_regrowth_rate = sugar_regrowth_rate
         self.investments_enabled = investments_enabled
+        self.lending_enabled = lending_enabled
         self.endowment_min = endowment_min
         self.endowment_max = endowment_max
         self.metabolism_min = metabolism_min
@@ -193,6 +196,7 @@ class SugarscapeG1mt(mesa.Model):
             agent_look_ahead_horizon=self.agent_look_ahead_horizon,
             opportunities=self._create_agent_opportunities(),
             investments_enabled=self.investments_enabled,
+            lending_enabled=self.lending_enabled,
             lender_vision=self.lender_vision,
             lender_look_ahead_horizon=self.lender_look_ahead_horizon
         )
@@ -212,7 +216,6 @@ class SugarscapeG1mt(mesa.Model):
             contract = self.contracts_by_id[contract_id]
             contract.status = new_status
 
-            # If the contract is no longer active, remove it from the agent index
             if new_status in [ContractStatus.REPAID, ContractStatus.DEFAULTED]:
                 self.contracts_by_agent[contract.creditor_id].discard(contract_id)
                 self.contracts_by_agent[contract.debtor_id].discard(contract_id)
@@ -221,7 +224,6 @@ class SugarscapeG1mt(mesa.Model):
         """Serializes the current state of the contract book to a JSON string."""
         serializable_ledger = {}
         for contract_id, contract_obj in self.contracts_by_id.items():
-            # asdict converts dataclass to dict; we then handle non-serializable types
             contract_dict = asdict(contract_obj)
             contract_dict['contract_type'] = contract_dict['contract_type'].name
             contract_dict['status'] = contract_dict['status'].name
@@ -290,6 +292,7 @@ class SugarscapeG1mt(mesa.Model):
             agent_look_ahead_horizon=self.agent_look_ahead_horizon,
             opportunities=self._create_agent_opportunities(),
             investments_enabled=self.investments_enabled,
+            lending_enabled=self.lending_enabled,
             lender_vision=self.lender_vision,
             lender_look_ahead_horizon=self.lender_look_ahead_horizon
         )
