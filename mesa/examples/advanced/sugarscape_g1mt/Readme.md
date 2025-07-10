@@ -1,5 +1,3 @@
-Understood. Here is the complete, updated `Readme.md` file, including the improved AI instruction protocol.
-
 ---
 # Sugarscape with an Investment and Lending Mechanic
 
@@ -166,6 +164,46 @@ C:.
 -   **Heterogeneous Lenders:** Introduce logic for lenders to have different risk tolerances and reservation rates, creating a more dynamic market for loans.
 -   **Demand Deposits:** Implement a new `ContractType` for demand deposits, where agents can store sugar with others for a small return, and withdraw it at will.
 -   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
+
+---
+## Using the DatabaseLogger
+
+The `DatabaseLogger` is a powerful tool for logging simulation data and text messages to a SQLite database. It is designed to be thread-safe by creating a new connection for each transaction, which is necessary for use with multi-threaded servers like Solara.
+
+### Key Features
+
+- **Thread-Safe:** Creates a new connection for each transaction.
+- **Logging Levels:** Supports standard logging levels (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+- **JSON Logging:** Encourages logging parseable JSON strings for efficient queries.
+- **Advanced SQLite JSON Query Capabilities:** Supports advanced usage of SQLite's JSON query capabilities for debugging and logging.
+
+### Best Practices
+
+- **Log JSON Objects:** When logging data, build a single JSON object that contains all relevant data for a debugging step. This avoids the need for complex joins to find related data.
+- **Efficient Queries:** Log data in a format that allows for efficient queries. For example, instead of logging a variable value before and after a function call to different rows, log both values in the same row as a single JSON object.
+
+### Example Usage
+
+```python
+from database_logger import DatabaseLogger
+
+# Initialize the logger
+logger = DatabaseLogger(db_path="simulation_results.db", print_level=DatabaseLogger.DEBUG)
+
+# Log a message with JSON data
+run_id = 1  # Example run ID
+data = {
+    "step": 10,
+    "agent_id": 42,
+    "action": "invest",
+    "amount": 100,
+    "before_wealth": 500,
+    "after_wealth": 400
+}
+logger.info(run_id, json.dumps(data))
+```
+
+By following these best practices, you can ensure that your simulation data is logged in a way that is efficient and easy to query, making debugging and analysis much more straightforward.
 
 ---
 ## AI Instructions (MANDATORY OPERATING PROTOCOL)
