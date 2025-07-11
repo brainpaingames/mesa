@@ -72,6 +72,9 @@ class SugarscapeG1mt(mesa.Model):
     ):
         super().__init__(seed=seed)
 
+        # --- CACHE INITIALIZATION ---
+        self._agents_by_id_cache = None
+
         self.dev_mode = dev_mode
         self.db_logger = db_logger
         self.run_id = run_id
@@ -200,6 +203,20 @@ class SugarscapeG1mt(mesa.Model):
             lender_vision=self.lender_vision,
             lender_look_ahead_horizon=self.lender_look_ahead_horizon
         )
+    
+    # --- LAZY-LOADED CACHE GETTER ---
+    def get_agent_by_id(self, agent_id):
+        """
+        Efficiently finds an agent by its ID using a lazily-loaded,
+        step-specific cache.
+        """
+        # If the cache hasn't been built for this step yet...
+        if self._agents_by_id_cache is None:
+            # ...build it now by iterating through all agents once.
+            self._agents_by_id_cache = {agent.unique_id: agent for agent in self.agents}
+
+        # Now, perform a fast dictionary lookup from the cache.
+        return self._agents_by_id_cache.get(agent_id) # .get() is safer than []
 
     def register_contract(self, draft_contract: Contract) -> int:
         new_id = self.next_contract_id
@@ -301,6 +318,9 @@ class SugarscapeG1mt(mesa.Model):
         """
         A unique step function that does staged activation.
         """
+        # --- RESET THE CACHE ---
+        self._agents_by_id_cache = None
+
         self.grid.sugar.data = np.minimum(
             self.grid.sugar.data + self.sugar_regrowth_rate, self.sugar_distribution
         )

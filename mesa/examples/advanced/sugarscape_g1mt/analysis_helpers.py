@@ -92,6 +92,24 @@ def get_model_data_for_runs(db_path: Path, selected_run_ids: tuple, _db_mod_time
             WHERE run_id IN ({placeholders})
         """
         df = pd.read_sql_query(query, conn, params=selected_run_ids)
+    
+    if df.empty:
+        return pd.DataFrame()
+
+    # --- THE FIX (Robust Version) ---
+    # 1. Attempt to convert the 'reporter_value' column to numbers.
+    #    The `errors='coerce'` argument is key: it will turn any value
+    #    that can't be converted (like a JSON string) into `NaN` (Not a Number).
+    numeric_values = pd.to_numeric(df['reporter_value'], errors='coerce')
+
+    # 2. Find the names of all reporters that had at least one non-numeric value.
+    #    We group by reporter_name and check which groups now contain a `NaN`.
+    non_numeric_reporters = df.loc[numeric_values.isna(), 'reporter_name'].unique()
+
+    # 3. Filter the original DataFrame to exclude all rows from these reporters.
+    if len(non_numeric_reporters) > 0:
+        df = df[~df['reporter_name'].isin(non_numeric_reporters)]
+    # --- END THE FIX ---
 
     wide_df = df.pivot_table(index=['run_id', 'step'], columns='reporter_name', values='reporter_value').reset_index()
     return wide_df

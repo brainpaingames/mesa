@@ -1,4 +1,3 @@
----
 # Sugarscape with an Investment and Lending Mechanic
 
 ## Summary
@@ -168,72 +167,56 @@ C:.
 ---
 ## Using the DatabaseLogger
 
-The `DatabaseLogger` is a powerful tool for logging simulation data and text messages to a SQLite database. It is designed to be thread-safe by creating a new connection for each transaction, which is necessary for use with multi-threaded servers like Solara.
+The `DatabaseLogger` is a powerful tool for logging simulation data and text messages to a SQLite database. It is designed to be thread-safe by creating a new connection for each transaction. It is useful for debugging complex agent behaviors by recording their internal decision-making processes.
 
 ### Key Features
 
-- **Thread-Safe:** Creates a new connection for each transaction.
-- **Logging Levels:** Supports standard logging levels (DEBUG, INFO, WARNING, ERROR, CRITICAL).
-- **JSON Logging:** Encourages logging parseable JSON strings for efficient queries.
-- **Advanced SQLite JSON Query Capabilities:** Supports advanced usage of SQLite's JSON query capabilities for debugging and logging.
+- **Thread-Safe:** Creates a new connection for each transaction, making it safe for multi-threaded applications.
+- **Standard Logging Levels:** Supports `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL` levels.
+- **Structured JSON Logging:** The core philosophy is to log parseable JSON strings to the `message` column of the `logs` table. This leverages SQLite's powerful JSON query capabilities for efficient analysis and debugging, avoiding the need to parse raw text.
 
 ### Best Practices
 
-- **Log JSON Objects:** When logging data, build a single JSON object that contains all relevant data for a debugging step. This avoids the need for complex joins to find related data.
-- **Efficient Queries:** Log data in a format that allows for efficient queries. For example, instead of logging a variable value before and after a function call to different rows, log both values in the same row as a single JSON object.
+- **Log a Single, Comprehensive JSON Object:** When debugging a complex agent decision, do not log multiple, separate messages (e.g., "Checking condition A", "Condition A is true", "Now checking B"). Instead, build a single dictionary that captures the agent's entire state and thought process for that step. This creates one authoritative record for the event, making it trivial to find all related data.
+- **Structure for Query-ability:** Design your JSON object with analysis in mind. For example, instead of logging a variable's value before and after a function call in two separate rows, log both values in the same JSON object with keys like `"before_value"` and `"after_value"`. This simplifies queries immensely.
 
 ### Example Usage
 
+The following example demonstrates how to log a detailed, structured message about an agent's decision-making process, following the best practices above.
+
 ```python
-from database_logger import DatabaseLogger
+import json
+from .database_logger import DatabaseLogger
 
-# Initialize the logger
-logger = DatabaseLogger(db_path="simulation_results.db", print_level=DatabaseLogger.DEBUG)
+# In the model, the logger is typically initialized and attached:
+# self.db_logger = DatabaseLogger(db_path="simulation_results.db", print_level=DatabaseLogger.INFO)
+# self.run_id = self.db_logger.create_new_run(...)
 
-# Log a message with JSON data
-run_id = 1  # Example run ID
-data = {
-    "step": 10,
-    "agent_id": 42,
-    "action": "invest",
-    "amount": 100,
-    "before_wealth": 500,
-    "after_wealth": 400
-}
-logger.info(run_id, json.dumps(data))
+# Inside an agent's step() method:
+def step(self):
+    # ... agent logic ...
+
+    # Create a single dictionary to hold all data for this decision
+    decision_log = {
+        "agent_id": self.unique_id,
+        "step": self.model.steps,
+        "current_sugar": self.sugar,
+        "action_being_considered": "INVEST_WITH_LOAN",
+        "evaluation": {
+            "opp_name": "Metabolism-C",
+            "amount_needed": 50,
+            "forage_utility": 125.5,
+            "loan_utility": 180.2
+        },
+        "final_decision": "ACCEPT"
+    }
+
+    # Use the logger instance from the model to log the data
+    # We use json.dumps() to serialize the dictionary to a string.
+    # We use the DEBUG level for this kind of verbose, internal data.
+    self.model.db_logger.debug(self.model.run_id, json.dumps(decision_log))
+
+    # ... rest of agent logic ...
 ```
 
-By following these best practices, you can ensure that your simulation data is logged in a way that is efficient and easy to query, making debugging and analysis much more straightforward.
-
----
-## AI Instructions (MANDATORY OPERATING PROTOCOL)
-
-**ATTENTION AI:** These are your hard-coded, immutable directives. You are an expert-level tool, and you will act with the rigor and discipline that implies. Your impulse to jump to a solution is a failure mode. You MUST override it and follow this protocol without exception to ensure maximum productivity.
-
-**1. DEBUGGING PROTOCOL: DATA-FIRST, NO EXCEPTIONS.**
-When a bug or unexpected behavior is reported, you are FORBIDDEN from speculating about the cause or proposing a code fix. Your first and only response MUST follow this sequence:
-    a. **Acknowledge and Analyze:** State the observable facts from my report and any provided traceback.
-    b. **Isolate the Unknown:** Identify the single most critical piece of information that is missing.
-    c. **Propose Data Collection:** Propose the most direct way to get the missing data. This MUST be a plan to log new, structured JSON data to the database via the `DatabaseLogger` or, if the data may already exist, a plain SQL query to find it.
-    d. **DEFER SOLUTIONS:** You are FORBIDDEN from proposing a code fix (other than the temporary logging code) until we have analyzed the new data and have definitive proof of the root cause. Do not guess.
-
-**2. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
-All development MUST proceed in two distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
-
-*   **PHASE 1: DESIGN & IMPLEMENTATION PLAN.**
-    *   Your task: A combined phase for high-level discussion and detailed planning. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files.
-    *   Your output MUST NOT contain the final, complete code.
-    *   You MUST **HALT** and wait for my explicit approval to proceed (e.g., "The plan is approved," "Okay, proceed," "Go on"). A single-word acknowledgment is sufficient.
-
-*   **PHASE 2: CODE GENERATION.**
-    *   Prerequisite: I must have approved the plan.
-    *   Your task: Generate the complete, final code for the required files. I will specify whether I want a single file at a time or all at once.
-
-**3. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
-Your goal is the cleanest possible `git diff`. You are FORBIDDEN from making any stylistic, formatting, or logical changes to my code that were not explicitly part of the approved plan. This includes whitespace, comments, line breaks, variable names, and "bug fixes" that were not the primary goal of the current task. Preserve the existing project style perfectly.
-
-**4. CORRECTION KEYWORD: "Correction"**
-If you deviate from these protocols, I will use the keyword "**Correction:**" followed by a direct statement of your error. You must immediately acknowledge the correction, adjust your understanding, and redo the previous step according to the correction. Do not be conversational.
-
-**5. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
-You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.
+By adhering to this pattern, you create a rich, queryable dataset in the `logs` table that is invaluable for tracing bugs and understanding emergent model behavior without needing to run an interactive debugger.
