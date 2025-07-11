@@ -85,38 +85,17 @@ class Trader(CellAgent):
         The lender's passive evaluation of a loan proposal.
         Returns its own reservation amount (0.0) if acceptable, otherwise None.
         """
-        lender_log_data = {
-            "lender_id": self.unique_id,
-            "borrower_id": draft_contract.debtor_id,
-            "step": self.model.steps,
-            "current_sugar": self.sugar,
-            "principal_requested": draft_contract.principal,
-            "borrower_reservation_amount": borrower_reservation_amount,
-            "decision": None,
-            "rejection_reason": None
-        }
-
         lender_reservation_amount = 0.0
 
         if borrower_reservation_amount < lender_reservation_amount:
-            lender_log_data["decision"] = None
-            lender_log_data["rejection_reason"] = "Borrower reservation amount too low"
-            self.model.db_logger.debug(self.model.run_id, json.dumps(lender_log_data))
             return None
         
         borrower = self.model.get_agent_by_id(draft_contract.debtor_id)
         if borrower is None:
-            lender_log_data["decision"] = None
-            lender_log_data["rejection_reason"] = "Borrower is no longer active."
-            self.model.db_logger.warning(self.model.run_id, json.dumps(lender_log_data))
             return None
 
         borrower_cell_capacity = self.model.sugar_distribution[borrower.cell.coordinate]
-        lender_log_data["borrower_cell_capacity"] = float(borrower_cell_capacity)
         if borrower_cell_capacity < 3:
-            lender_log_data["decision"] = None
-            lender_log_data["rejection_reason"] = "Borrower cell capacity too low"
-            self.model.db_logger.debug(self.model.run_id, json.dumps(lender_log_data))
             return None
 
         sim_sugar = self.sugar
@@ -126,17 +105,10 @@ class Trader(CellAgent):
             sim_sugar += worst_case_harvest
             sim_sugar -= my_metabolism
         surplus_sugar = max(0, sim_sugar)
-        lender_log_data["lender_surplus_sugar"] = surplus_sugar
 
         if draft_contract.principal > surplus_sugar:
-            lender_log_data["decision"] = None
-            lender_log_data["rejection_reason"] = "Insufficient surplus sugar"
-            self.model.db_logger.debug(self.model.run_id, json.dumps(lender_log_data))
             return None
 
-        lender_log_data["decision"] = lender_reservation_amount
-        lender_log_data["rejection_reason"] = "Offer accepted"
-        self.model.db_logger.debug(self.model.run_id, json.dumps(lender_log_data))
         return lender_reservation_amount
 
     def get_capability(self, key):
@@ -288,51 +260,23 @@ class Trader(CellAgent):
             forage_utility, forage_death = self.simulate_forage_scenario(horizon)
             if forage_death: forage_utility = -1
             
-            step_decision_log = {
-                "agent_id": self.unique_id,
-                "step": self.model.steps,
-                "initial_sugar": self.sugar,
-                "forage_utility": forage_utility,
-                "investment_evaluations": [],
-                "final_decision": None
-            }
-
             candidate_actions = [(forage_utility, ("FORAGE", None))]
 
             if self.investments_enabled:
                 for opp in self.available_opportunities:
-                    opp_eval_log = {
-                        "opp_name": opp.name,
-                        "is_affordable": None,
-                        "self_funded_utility": None,
-                        "loan_consideration": None,
-                        "loan_debug_trace": None
-                    }
-
                     if not opp.is_available(self):
-                        step_decision_log["investment_evaluations"].append(opp_eval_log)
                         continue
                     
-                    opp_eval_log["is_affordable"] = True
                     utility, is_death = opp.calculate_utility(self, horizon)
 
                     if not is_death:
-                        opp_eval_log["self_funded_utility"] = utility
                         candidate_actions.append((utility, ("INVEST", opp)))
                     elif self.lending_enabled:
-                        opp_eval_log["is_affordable"] = False
-                        
-                        loan_debug_trace = {}
-                        opp_eval_log["loan_debug_trace"] = loan_debug_trace
-
                         survival_cost = opp.cost["metabolism_during_investment"] * (opp.cost["duration"] + 1)
                         shortfall = max(0, survival_cost - self.sugar)
                         amount_needed = shortfall
-                        loan_debug_trace["amount_needed"] = amount_needed
                         
                         if amount_needed <= 0:
-                            loan_debug_trace["exit_reason"] = "No shortfall, loan not needed."
-                            step_decision_log["investment_evaluations"].append(opp_eval_log)
                             continue
                         
                         term = opp.cost["duration"] + 10
@@ -344,28 +288,13 @@ class Trader(CellAgent):
                         )
                         
                         utility_zero_interest, death_zero_interest = self._calculate_utility_with_hypothetical_loan(opp, draft_contract)
-                        loan_debug_trace["utility_zero_interest"] = utility_zero_interest
-                        loan_debug_trace["death_zero_interest"] = death_zero_interest
 
                         if death_zero_interest:
-                            loan_debug_trace["exit_reason"] = "Agent would die even with a zero-interest loan."
-                            step_decision_log["investment_evaluations"].append(opp_eval_log)
                             continue
 
                         reservation_amount = max(0, utility_zero_interest - forage_utility)
-                        loan_debug_trace["reservation_amount"] = reservation_amount
                         
-                        loan_consideration_log = {
-                            "amount_needed": amount_needed,
-                            "utility_zero_interest": utility_zero_interest,
-                            "reservation_amount": reservation_amount,
-                            "lender_polls": []
-                        }
-                        opp_eval_log["loan_consideration"] = loan_consideration_log
-
                         if reservation_amount <= 0:
-                            loan_debug_trace["exit_reason"] = "Investment with loan is not better than foraging."
-                            step_decision_log["investment_evaluations"].append(opp_eval_log)
                             continue
                         
                         neighbors = [
@@ -379,12 +308,6 @@ class Trader(CellAgent):
                         for lender in neighbors:
                             lender_offer = lender.get_lending_offer(draft_contract, reservation_amount)
                             
-                            loan_consideration_log["lender_polls"].append({
-                                "lender_id": lender.unique_id,
-                                "lender_sugar": lender.sugar,
-                                "offer_received": lender_offer
-                            })
-
                             if lender_offer is not None:
                                 final_interest = (reservation_amount + lender_offer) / 2
                                 hypothetical_loan = Contract(
@@ -396,29 +319,9 @@ class Trader(CellAgent):
                                 
                                 if not final_death:
                                     candidate_actions.append((final_utility, ("INVEST_WITH_LOAN", opp, lender, amount_needed, final_interest)))
-                    
-                    step_decision_log["investment_evaluations"].append(opp_eval_log)
             
             candidate_actions.sort(key=lambda x: x[0], reverse=True)
             best_utility, best_action_data = candidate_actions[0]
-
-            action_type_log = best_action_data[0]
-            action_details = {}
-            if action_type_log == "INVEST":
-                action_details = {"opp_name": best_action_data[1].name}
-            elif action_type_log == "INVEST_WITH_LOAN":
-                action_details = {
-                    "opp_name": best_action_data[1].name,
-                    "lender_id": best_action_data[2].unique_id,
-                    "amount": best_action_data[3],
-                    "interest": best_action_data[4]
-                }
-            step_decision_log["final_decision"] = {
-                "utility": best_utility,
-                "action_type": action_type_log,
-                "details": action_details
-            }
-            self.model.db_logger.debug(self.model.run_id, json.dumps(step_decision_log, default=str))
 
             action_type = best_action_data[0]
             

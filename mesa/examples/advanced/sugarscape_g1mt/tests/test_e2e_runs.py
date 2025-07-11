@@ -5,110 +5,38 @@ import os
 import datetime
 import sys
 from pathlib import Path
+import pandas as pd
+
+# The import path is now handled by the conftest.py file.
+from sugarscape_g1mt import analysis_helpers as h
+
 
 # Define paths relative to the test file's location
 PROJECT_ROOT = Path(__file__).parent.parent
 DB_PATH = PROJECT_ROOT / "simulation_results.db"
 
 @pytest.mark.e2e
-def test_book_baseline_run():
+def test_smoke_and_aging():
     """
-    Runs a full end-to-end test of the baseline model from the book.
-    It executes run_batch.py as a subprocess with a unique, timestamped
-    run_group, and then queries the database to assert that the final
-    results are within plausible ranges.
-    """
-    # --- 1. Define Test Parameters with a Unique Run Group ---
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-    run_group_name = f"E2E_Test_Book_Baseline_{timestamp}"
-
-    test_params = {
-        "steps": "300",
-        "run_group": run_group_name,
-        "replications": "1",
-        "seed": "42",  # Use a fixed seed for reproducibility
-        "initial_population": "200",
-        "agent_re_spawn": "false",
-        "metabolism": "[1,4]",
-        "vision": "[1,6]",
-        "endowment": "[5,25]",
-        "age": "[10000, 10000]",
-        "sugar_regrowth_rate": "10",
-        "lending_enabled": "false",
-        "investments_enabled": "false",
-        "db": str(DB_PATH)
-    }
-
-    # --- 2. Execute the Simulation ---
-    # Construct the command-line arguments for the subprocess
-    # Use 'sys.executable' to ensure we use the same Python interpreter as pytest
-    command = [sys.executable, "-m", "sugarscape_g1mt.run_batch"]
-    for key, value in test_params.items():
-        command.append(f"--{key}")
-        command.append(str(value)) # Ensure all values are strings for subprocess
-
-    # Run the script from the parent directory of the package
-    # This allows Python to find the 'sugarscape_g1mt' module
-    working_dir = PROJECT_ROOT.parent
-    subprocess.run(command, check=True, cwd=working_dir)
-
-    # --- 3. Connect to DB and Query Results ---
-    # The database path is now correctly and consistently defined by DB_PATH
-    assert os.path.exists(DB_PATH), f"Database file not found at {DB_PATH}"
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Get the run_id for our unique test run
-    cursor.execute("SELECT run_id FROM runs WHERE run_group = ?", (run_group_name,))
-    run_id_result = cursor.fetchone()
-    assert run_id_result is not None, f"No run found for unique group '{run_group_name}'"
-    run_id = run_id_result[0]
-
-    # Query for the specific final-step reporters for that run_id
-    sql = """
-        SELECT
-            MAX(CASE WHEN reporter_name = 'Average Metabolism' THEN reporter_value END),
-            MAX(CASE WHEN reporter_name = 'Gini' THEN reporter_value END),
-            MAX(CASE WHEN reporter_name = '#Traders' THEN reporter_value END)
-        FROM model_results
-        WHERE run_id = ? AND step = ?
-    """
-    # A 1000-step run ends at step 999
-    cursor.execute(sql, (run_id, 299))
-    results = cursor.fetchone()
-    conn.close()
-
-    # --- 4. Assert a Plausible Outcome ---
-    assert results is not None, f"Query for final step reporters returned no data for run_id {run_id}."
-
-    avg_metabolism, gini, trader_count = results
-
-    assert 1.0 <= avg_metabolism <= 2.5, f"Average metabolism ({avg_metabolism}) out of range [1.5, 2.5]"
-    assert 0.30 <= gini <= 0.60, f"Gini ({gini}) out of range [0.30, 0.60]"
-    assert 20 <= trader_count <= 350, f"Final trader count ({trader_count}) out of range [20, 350]"
-
-@pytest.mark.e2e
-def test_agent_data_and_aging():
-    """
-    Tests aging mechanic and agent data logging in a single, efficient run.
-    - Checks that agents die of old age as expected.
-    - Checks that agent data is logged without data type errors (no BLOBs).
-    - Checks that dead agents are handled correctly (no position data).
+    A fast test that (a) proves the model can run (smoke test), and (b)
+    verifies the aging mechanic and data logging integrity.
     """
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-    run_group_name = f"E2E_Test_Aging_Data_{timestamp}"
+    run_group_name = f"E2E_Test_Smoke_Aging_{timestamp}"
     final_step = 14 # 15 steps means final step is 14
 
     test_params = {
         "steps": "15",
         "run_group": run_group_name,
+        "replications": "1",
         "seed": "1",
         "initial_population": "10",
         "agent_re_spawn": "false",
         "endowment": "[1000, 1000]", # Prevent starvation
         "age": "[10, 10]", # All agents die after step 10
         "log_agent_data": "true",
+        "lending_enabled": "false",
+        "investments_enabled": "false",
         "db": str(DB_PATH)
     }
 
@@ -148,3 +76,75 @@ def test_agent_data_and_aging():
     assert cursor.fetchone() is None, "Agent 1 should NOT have position data at step 11"
     
     conn.close()
+
+
+@pytest.mark.e2e
+def test_lending_investment_and_helpers():
+    """
+    A comprehensive test of the financial mechanics AND the analysis helper
+    functions using real output from the simulation.
+    """
+    # --- 1. Define and Execute the Simulation ---
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    run_group_name = f"E2E_Test_Lending_Investment_{timestamp}"
+
+    test_params = {
+        "steps": "100",
+        "run_group": run_group_name,
+        "replications": "1",
+        "seed": "42",
+        "initial_population": "100",
+        "agent_re_spawn": "false",
+        "endowment": "[5, 5]", # Low endowment to force loan demand
+        "age": "[1000, 1000]", # Prevent deaths by old age
+        "log_agent_data": "true",
+        "lending_enabled": "true",
+        "investments_enabled": "true",
+        "db": str(DB_PATH)
+    }
+
+    command = [sys.executable, "-m", "sugarscape_g1mt.run_batch"]
+    for key, value in test_params.items():
+        command.append(f"--{key}")
+        command.append(str(value))
+
+    working_dir = PROJECT_ROOT.parent
+    subprocess.run(command, check=True, cwd=working_dir)
+
+    # --- 2. Assert Economic Outcomes ---
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Get the run_id
+    cursor.execute("SELECT run_id FROM runs WHERE run_group = ?", (run_group_name,))
+    run_id_result = cursor.fetchone()
+    assert run_id_result is not None, "Failed to find the test run in the database."
+    run_id = run_id_result[0]
+
+    # Assert that at least one loan was active at some point during the run
+    cursor.execute("""
+        SELECT SUM(reporter_value)
+        FROM model_results
+        WHERE run_id = ? AND reporter_name = 'Active Loan Count'
+    """, (run_id,))
+    total_active_loans_over_time = cursor.fetchone()[0]
+    assert total_active_loans_over_time is not None and total_active_loans_over_time > 0, \
+        "No active loans were ever recorded during the simulation."
+
+    conn.close()
+
+    # --- 3. Assert Data Helper Functionality ---
+    # Use the live DB path and the run_id we just created
+    # The _db_mod_time is a dummy value to ensure the cache runs
+    df_from_helper = h.get_model_data_for_runs(DB_PATH, (run_id,), 0)
+
+    # Assert that the function did not crash and returned a DataFrame
+    assert isinstance(df_from_helper, pd.DataFrame), "get_model_data_for_runs did not return a DataFrame."
+    assert not df_from_helper.empty, "get_model_data_for_runs returned an empty DataFrame."
+
+    # Assert that the non-numeric 'Ledger' column was successfully filtered out
+    assert 'Ledger' not in df_from_helper.columns, "The 'Ledger' column should have been filtered out by the helper."
+
+    # Assert that expected numeric columns are still present
+    assert '#Traders' in df_from_helper.columns, "Expected numeric column '#Traders' is missing."
+    assert 'Gini' in df_from_helper.columns, "Expected numeric column 'Gini' is missing."

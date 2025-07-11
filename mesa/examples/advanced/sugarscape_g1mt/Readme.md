@@ -33,6 +33,15 @@ The lending system is built on a "Dumb Data, Smart Agent" philosophy.
 -   **The Central Ledger:** The model owns a single, authoritative ledger of all contracts. This ledger is indexed for high-performance lookups, preventing data duplication and ensuring integrity. It serves as the single source of truth for all financial obligations.
 -   **Agent-Based Rules:** All intelligence resides within the `Trader` agents. Their `step()` method contains the rules for how they interact with the ledger. This includes evaluating opportunities, deciding whether to seek a loan, polling potential lenders, and finalizing loan agreements.
 
+### Agent ID Lookup & Caching
+
+To ensure high performance, this project uses a non-standard, optimized method for agent lookups. Instead of a linear-time search through the agent list, it uses a **lazy-loaded, step-specific cache**.
+
+-   **`model.get_agent_by_id(id)`:** This is the **only** correct way to retrieve an agent by its ID.
+-   **Mechanism:** The first time this method is called in a model step, it iterates through all active agents once (an O(N) operation) to build a dictionary that maps `unique_id` to the agent object. This dictionary is cached.
+-   **Performance:** Every subsequent call to `get_agent_by_id` within the same model step is a nearly instantaneous O(1) dictionary lookup.
+-   **Safety:** The cache is automatically cleared at the beginning of every model step to prevent data from previous steps from being used. The getter method also gracefully returns `None` if an agent ID is not found (e.g., if the agent died mid-step), and calling code is expected to handle this `None` case.
+
 ### Coordinate System Convention
 
 To prevent ambiguity and errors, the project adheres to a strict coordinate system convention:
@@ -67,7 +76,7 @@ The interactive dashboard is the main way to visualize and explore simulation re
 streamlit run sugarscape_g1mt/dashboard.py
 ```
 
-### Batch Experiments (Command-Line)
+### Single Batch Experiments (Command-Line)
 
 The `run_batch.py` script is used for running one or more simulations without the GUI, with all results logged to the database.
 
@@ -84,9 +93,19 @@ The `run_batch.py` script is used for running one or more simulations without th
     python -m sugarscape_g1mt.run_batch --replications 3 --initial_population "[250, 350]" --endowment "[[6,6], [10,20]]"
     ```
 
+### Running Experiment Series (PowerShell)
+
+To run a pre-defined series of comparative experiments and report the runtime for each, use the provided PowerShell script.
+
+*   **Command:**
+    ```powershell
+    .\sugarscape_g1mt\run_experiments.ps1
+    ```
+*   **Description:** This script executes a sequence of `run_batch.py` commands with different parameter configurations (e.g., baseline, investments-only, lending-enabled) to generate a full set of data for comparative analysis.
+
 ### End-to-End Tests
 
-The `pytest` suite runs a full simulation and asserts that the results fall within plausible scientific ranges.
+The `pytest` suite provides critical checks for project integrity and correctness. It includes a fast smoke test, an aging and data-logging integrity check, and a comprehensive E2E test for the lending and investment mechanics.
 
 *   **Command:**
     ```bash
@@ -131,6 +150,7 @@ C:.
 │   model.py                # Main Mesa model class (SugarscapeG1mt)
 │   agents.py               # Defines the Trader agent class
 │   run_batch.py            # Script for command-line batch runs
+│   run_experiments.ps1     # PowerShell script to run experiment series
 │   database_logger.py      # Class for logging all data to SQLite
 │
 │   investments.json        # External definitions for all investment opportunities
@@ -149,31 +169,29 @@ C:.
     │   1_Time_Series_Analysis.py
     │   2_Distribution_Analysis.py
     │   3_Spatial_Inspector.py
+└───tests
+    │   conftest.py         # Pytest configuration for path handling
+    │   test_e2e_runs.py
+    │   ...
 ```
 
 ## Development Backlog
 
 ### Immediate / Short-Term Tasks
 -   **Extensive Testing:** Rigorously test the new lending functionality under various parameter settings.
--   **New Test Cases:** Create new, targeted tests in the `pytest` suite to cover edge cases in the lending market (e.g., loan defaults, market saturation).
 -   **Refine Opportunity Cost:** The agent's calculation for its reservation interest amount should use the utility of its best *non-borrowing* alternative as the baseline, not just the foraging utility.
 -   **Refactor `get_potential_harvest`:** Consolidate the duplicated logic for this method from `agents.py` and `investment.py` into a single function.
+-   **Demand Deposits:** Implement a new `ContractType` for demand deposits, where agents can store sugar with others for a small return, and withdraw it at will.
 
 ### Long-Term Goals / Epics
 -   **Heterogeneous Lenders:** Introduce logic for lenders to have different risk tolerances and reservation rates, creating a more dynamic market for loans.
--   **Demand Deposits:** Implement a new `ContractType` for demand deposits, where agents can store sugar with others for a small return, and withdraw it at will.
 -   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
+-   **Visual Regression Testing:** Implement a browser automation test suite (e.g., with Playwright) to test the Streamlit dashboard for visual correctness and prevent UI regressions.
 
 ---
 ## Using the DatabaseLogger
 
-The `DatabaseLogger` is a powerful tool for logging simulation data and text messages to a SQLite database. It is designed to be thread-safe by creating a new connection for each transaction. It is useful for debugging complex agent behaviors by recording their internal decision-making processes.
-
-### Key Features
-
-- **Thread-Safe:** Creates a new connection for each transaction, making it safe for multi-threaded applications.
-- **Standard Logging Levels:** Supports `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL` levels.
-- **Structured JSON Logging:** The core philosophy is to log parseable JSON strings to the `message` column of the `logs` table. This leverages SQLite's powerful JSON query capabilities for efficient analysis and debugging, avoiding the need to parse raw text.
+The `DatabaseLogger` is a powerful tool for temporary debugging of complex agent behaviors by recording their internal decision-making processes to the `logs` table.
 
 ### Best Practices
 
@@ -211,12 +229,46 @@ def step(self):
         "final_decision": "ACCEPT"
     }
 
-    # Use the logger instance from the model to log the data
-    # We use json.dumps() to serialize the dictionary to a string.
-    # We use the DEBUG level for this kind of verbose, internal data.
-    self.model.db_logger.debug(self.model.run_id, json.dumps(decision_log))
-
-    # ... rest of agent logic ...
+# Use the logger instance from the model to log the data
+self.model.db_logger.debug(self.model.run_id, json.dumps(decision_log))
 ```
 
-By adhering to this pattern, you create a rich, queryable dataset in the `logs` table that is invaluable for tracing bugs and understanding emergent model behavior without needing to run an interactive debugger.
+---
+## AI Instructions (MANDATORY OPERATING PROTOCOL)
+
+**ATTENTION AI:** These are your hard-coded, immutable directives. You are an expert-level tool, and you will act with the rigor and discipline that implies. Your impulse to jump to a solution is a failure mode. You MUST override it and follow this protocol without exception to ensure maximum productivity.
+
+**1. DEBUGGING PROTOCOL: DATA-FIRST, NO EXCEPTIONS.**
+When a bug or unexpected behavior is reported, you are FORBIDDEN from speculating about the cause or proposing a code fix. Your first and only response MUST follow this diagnostic funnel:
+    a. **Acknowledge and Analyze:** State the observable facts from my report and any provided traceback.
+    b. **Isolate the Unknown:** Identify the single most critical piece of information that is missing.
+    c. **Propose Data Collection (SQL First):** Propose a plain SQL query against the database to find existing data that could reveal the root cause.
+    d. **Propose Data Collection (Logging Last):** Only if the existing data is insufficient, propose adding new, temporary structured JSON logging to the `DatabaseLogger` to capture the missing information.
+    e. **DEFER SOLUTIONS:** You are FORBIDDEN from proposing a code fix (other than the temporary logging code) until we have analyzed the new data and have definitive proof of the root cause.
+
+**2. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
+All development MUST proceed in two distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
+
+*   **PHASE 1: DESIGN & IMPLEMENTATION PLAN.**
+    *   Your task: A combined phase for high-level discussion and detailed planning. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files.
+    *   Your output MUST NOT contain the final, complete code.
+    *   You MUST **HALT** and wait for my explicit approval to proceed (e.g., "The plan is approved," "Okay, proceed," "Go on").
+
+*   **PHASE 2: CODE GENERATION.**
+    *   Prerequisite: I must have approved the plan.
+    *   Your task: Generate the complete, final code for the required files. I will specify whether I want a single file at a time or all at once.
+
+**3. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
+Your goal is the cleanest possible `git diff`. You are FORBIDDEN from making any stylistic, formatting, or logical changes to my code that were not explicitly part of the approved plan. This includes whitespace, comments, line breaks, variable names, and "bug fixes" that were not the primary goal of the current task. Preserve the existing project style perfectly.
+
+**4. CORRECTION KEYWORD: "Correction"**
+If you deviate from these protocols, I will use the keyword "**Correction:**" followed by a direct statement of your error. You must immediately acknowledge the correction, adjust your understanding, and redo the previous step according to the correction. Do not be conversational.
+
+**5. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
+You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.
+
+**6. CRITICAL API DIRECTIVE: `agents_by_id` ACCESS PATTERN.**
+You are FORBIDDEN from using `self.model.scheduler` or `self.model.schedule` to look up agents. The correct, authoritative access pattern for retrieving an agent by its ID in this project is `self.model.get_agent_by_id(agent_id)`. This is a custom method on the `SugarscapeG1mt` model that uses a performant, step-specific cache. You will use this pattern exclusively.
+
+**7. CRITICAL API DIRECTIVE: INTERNALIZE PROJECT-SPECIFIC APIs.**
+You are FORBIDDEN from assuming a method or attribute exists on a custom project class (e.g., `SugarscapeG1mt`) based on standard library or Mesa conventions. Before using a method, you must confirm its existence by (a) consulting this README's architectural description or (b) asking me to provide the source code for the relevant class.
