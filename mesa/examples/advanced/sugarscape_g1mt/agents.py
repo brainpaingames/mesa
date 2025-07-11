@@ -2,7 +2,9 @@ import math
 import json 
 import inspect
 from mesa.discrete_space import CellAgent
-
+from .contracts import Contract, ContractType, ContractStatus
+from .investment import SimulatedAgent
+from .database_logger import DatabaseLogger
 
 def get_distance(cell_1, cell_2):
     """
@@ -24,9 +26,7 @@ class Trader(CellAgent):
     - Can invest sugar to permanently reduce metabolism.
     """
 
-# sugarscape_g1mt/agents.py
-
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, lender_vision=7, lender_look_ahead_horizon=20):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
@@ -42,11 +42,74 @@ class Trader(CellAgent):
             "agent_look_ahead_horizon": int(agent_look_ahead_horizon)
         }
         self.investments_enabled = investments_enabled
+        self.lending_enabled = lending_enabled
         self.available_opportunities = opportunities.copy() if opportunities is not None else []
         self.completed_investment_names = set()
         self.is_investing = False
         self.investment_counter = 0
         self.current_investment = None
+        self.lender_vision = int(lender_vision)
+        self.lender_look_ahead_horizon = int(lender_look_ahead_horizon)
+
+    def process_contract_maturities(self):
+        """
+        Handles accounting for any contracts that are due on the current step.
+        This method is non-discretionary.
+        """
+        my_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set()).copy()
+
+        for contract_id in my_contract_ids:
+            contract = self.model.contracts_by_id.get(contract_id)
+            if not contract or contract.status != ContractStatus.ACTIVE:
+                continue
+
+            if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == self.model.steps:
+                if contract.debtor_id == self.unique_id:
+                    amount_due = contract.total_repayment_amount
+                    payment = min(self.sugar, amount_due)
+                    
+                    self.sugar -= payment
+                    
+                    creditor = self.model.get_agent_by_id(contract.creditor_id)
+                    if creditor:
+                        creditor.sugar += payment
+
+                    if payment < amount_due:
+                        self.model.update_contract_status(contract_id, ContractStatus.DEFAULTED)
+                    else:
+                        self.model.update_contract_status(contract_id, ContractStatus.REPAID)
+
+
+    def get_lending_offer(self, draft_contract: Contract, borrower_reservation_amount: float) -> float | None:
+        """
+        The lender's passive evaluation of a loan proposal.
+        Returns its own reservation amount (0.0) if acceptable, otherwise None.
+        """
+        lender_reservation_amount = 0.0
+
+        if borrower_reservation_amount < lender_reservation_amount:
+            return None
+        
+        borrower = self.model.get_agent_by_id(draft_contract.debtor_id)
+        if borrower is None:
+            return None
+
+        borrower_cell_capacity = self.model.sugar_distribution[borrower.cell.coordinate]
+        if borrower_cell_capacity < 3:
+            return None
+
+        sim_sugar = self.sugar
+        worst_case_harvest = 0
+        my_metabolism = self.get_capability("metabolism_sugar")
+        for _ in range(self.lender_look_ahead_horizon):
+            sim_sugar += worst_case_harvest
+            sim_sugar -= my_metabolism
+        surplus_sugar = max(0, sim_sugar)
+
+        if draft_contract.principal > surplus_sugar:
+            return None
+
+        return lender_reservation_amount
 
     def get_capability(self, key):
         """Public getter for a capability."""
@@ -64,7 +127,6 @@ class Trader(CellAgent):
             caller_class = "N/A"
 
         old_value = self._capabilities_DO_NOT_TOUCH.get(key)
-        # Convert numpy types to native Python types for JSON serialization
         if hasattr(old_value, 'item'): old_value = old_value.item()
         if hasattr(value, 'item'): value = value.item()
 
@@ -153,16 +215,39 @@ class Trader(CellAgent):
         sim_sugar = self.sugar
         expected_harvest = self.get_max_potential_harvest()
         metabolism = self.get_capability("metabolism_sugar")
+        
+        agent_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set())
+        agent_contracts = [self.model.contracts_by_id[cid] for cid in agent_contract_ids if self.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
 
-        for _ in range(horizon):
+        for i in range(horizon):
+            current_sim_step = self.model.steps + 1 + i
+            for contract in agent_contracts:
+                if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
+                    if contract.creditor_id == self.unique_id:
+                        sim_sugar += contract.total_repayment_amount
+                    elif contract.debtor_id == self.unique_id:
+                        sim_sugar -= contract.total_repayment_amount
+
             sim_sugar += expected_harvest
             sim_sugar -= metabolism
             if sim_sugar <= 0:
                 return -1, True
         return sim_sugar, False
 
+    def _calculate_utility_with_hypothetical_loan(self, investment_opp, loan: Contract | None):
+        """Helper to simulate utility given a specific loan agreement (or None)."""
+        horizon = self.get_capability('agent_look_ahead_horizon')
+        
+        sim_agent = SimulatedAgent(self)
+        if loan:
+            sim_agent.sugar += loan.principal
+        
+        return investment_opp.calculate_utility(sim_agent, horizon, hypothetical_loan=loan)
+
     def step(self):
         """Main step logic for the agent."""
+        self.process_contract_maturities()
+
         if self.is_investing:
             self.investment_counter -= 1
             if self.investment_counter <= 0:
@@ -171,40 +256,103 @@ class Trader(CellAgent):
                 self.is_investing = False
                 self.current_investment = None
         else:
-            # --- Agent Decision Logic ---
             horizon = self.get_capability('agent_look_ahead_horizon')
-
-            # 1. Evaluate the status quo (foraging)
             forage_utility, forage_death = self.simulate_forage_scenario(horizon)
+            if forage_death: forage_utility = -1
             
-            best_utility = forage_utility
-            best_is_death = forage_death
-            chosen_action = ("FORAGE", None)
+            candidate_actions = [(forage_utility, ("FORAGE", None))]
 
             if self.investments_enabled:
-                # 2. Evaluate all available investment opportunities
                 for opp in self.available_opportunities:
-                    if opp.is_available(self):
-                        invest_utility, invest_death = opp.calculate_utility(self, horizon)
-                        
-                        # Prioritize survival, then highest utility
-                        if best_is_death and not invest_death:
-                            best_utility = invest_utility
-                            best_is_death = invest_death
-                            chosen_action = ("INVEST", opp)
-                        elif not best_is_death and not invest_death:
-                            if invest_utility > best_utility:
-                                best_utility = invest_utility
-                                chosen_action = ("INVEST", opp)
+                    if not opp.is_available(self):
+                        continue
+                    
+                    utility, is_death = opp.calculate_utility(self, horizon)
 
-            # 3. Execute the chosen action
-            action_type, investment_opp = chosen_action
+                    if not is_death:
+                        candidate_actions.append((utility, ("INVEST", opp)))
+                    elif self.lending_enabled:
+                        survival_cost = opp.cost["metabolism_during_investment"] * (opp.cost["duration"] + 1)
+                        shortfall = max(0, survival_cost - self.sugar)
+                        amount_needed = shortfall
+                        
+                        if amount_needed <= 0:
+                            continue
+                        
+                        term = opp.cost["duration"] + 10
+                        draft_contract = Contract(
+                            contract_type=ContractType.TERM_LOAN, creditor_id=-1,
+                            debtor_id=self.unique_id, principal=amount_needed,
+                            term_steps=term, issue_step=self.model.steps,
+                            interest_schedule=[0]
+                        )
+                        
+                        utility_zero_interest, death_zero_interest = self._calculate_utility_with_hypothetical_loan(opp, draft_contract)
+
+                        if death_zero_interest:
+                            continue
+
+                        reservation_amount = max(0, utility_zero_interest - forage_utility)
+                        
+                        if reservation_amount <= 0:
+                            continue
+                        
+                        neighbors = [
+                            agent
+                            for cell in self.cell.get_neighborhood(self.lender_vision, include_center=False)
+                            for agent in cell.agents
+                            if isinstance(agent, Trader)
+                        ]
+                        self.random.shuffle(neighbors)
+
+                        for lender in neighbors:
+                            lender_offer = lender.get_lending_offer(draft_contract, reservation_amount)
+                            
+                            if lender_offer is not None:
+                                final_interest = (reservation_amount + lender_offer) / 2
+                                hypothetical_loan = Contract(
+                                    contract_type=ContractType.TERM_LOAN, creditor_id=lender.unique_id,
+                                    debtor_id=self.unique_id, principal=amount_needed,
+                                    term_steps=term, issue_step=self.model.steps, interest_schedule=[final_interest]
+                                )
+                                final_utility, final_death = self._calculate_utility_with_hypothetical_loan(opp, hypothetical_loan)
+                                
+                                if not final_death:
+                                    candidate_actions.append((final_utility, ("INVEST_WITH_LOAN", opp, lender, amount_needed, final_interest)))
+            
+            candidate_actions.sort(key=lambda x: x[0], reverse=True)
+            best_utility, best_action_data = candidate_actions[0]
+
+            action_type = best_action_data[0]
+            
             if action_type == "INVEST":
+                _, investment_opp = best_action_data
                 self.is_investing = True
                 self.current_investment = investment_opp
                 self.investment_counter = investment_opp.cost["duration"]
                 self.set_capability("metabolism_sugar", investment_opp.cost["metabolism_during_investment"])
                 self.available_opportunities.remove(investment_opp)
+
+            elif action_type == "INVEST_WITH_LOAN":
+                _, investment_opp, lender, amount_needed, final_interest = best_action_data
+                
+                term = investment_opp.cost["duration"] + 10
+                final_contract = Contract(
+                    contract_type=ContractType.TERM_LOAN, creditor_id=lender.unique_id,
+                    debtor_id=self.unique_id, principal=amount_needed,
+                    term_steps=term, issue_step=self.model.steps,
+                    interest_schedule=[final_interest]
+                )
+                lender.sugar -= amount_needed
+                self.sugar += amount_needed
+                self.model.register_contract(final_contract)
+                
+                self.is_investing = True
+                self.current_investment = investment_opp
+                self.investment_counter = investment_opp.cost["duration"]
+                self.set_capability("metabolism_sugar", investment_opp.cost["metabolism_during_investment"])
+                self.available_opportunities.remove(investment_opp)
+
             else: # FORAGE
                 self.move()
                 self.eat()

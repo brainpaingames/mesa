@@ -22,7 +22,7 @@ st.markdown("Explore the distribution of agent attributes for a single simulatio
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=20, help="Number of recent runs to show. 0 for all.")
+    parser.add_argument("--limit", type=int, default=100, help="Number of recent runs to show. 0 for all.")
     parser.add_argument("--include-tests", action="store_true", help="Include test runs.")
     try:
         args, _ = parser.parse_known_args()

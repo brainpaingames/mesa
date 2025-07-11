@@ -21,7 +21,7 @@ st.markdown("Compare model-level reporters across multiple simulation runs.")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="An interactive analysis app for Sugarscape simulation results.")
-    parser.add_argument("--limit", type=int, default=20, help="Number of recent runs to show. 0 for all.")
+    parser.add_argument("--limit", type=int, default=100, help="Number of recent runs to show. 0 for all.")
     parser.add_argument("--include-tests", action="store_true", help="Include test runs in the dropdown list.")
     try:
         args, _ = parser.parse_known_args()

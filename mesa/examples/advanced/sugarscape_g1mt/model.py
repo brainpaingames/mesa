@@ -9,6 +9,9 @@ import datetime
 import json
 from .database_logger import DatabaseLogger
 from .investment import InvestmentOpportunity
+from collections import defaultdict
+from .contracts import Contract, ContractStatus
+from dataclasses import asdict
 
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""
@@ -44,6 +47,7 @@ class SugarscapeG1mt(mesa.Model):
         agent_re_spawn=True,
         sugar_regrowth_rate=1.0,
         investments_enabled=True,
+        lending_enabled=True,
         investment_portfolio_name="default",
         investment_json_path="sugarscape_g1mt/investments.json",
         endowment_min=25,
@@ -55,6 +59,8 @@ class SugarscapeG1mt(mesa.Model):
         agent_age_min=60,
         agent_age_max=100,
         agent_look_ahead_horizon=15,
+        lender_vision=7,
+        lender_look_ahead_horizon=20,
         run_group="default",
         description="A simulation run.",
         log_agent_data=False,
@@ -65,6 +71,9 @@ class SugarscapeG1mt(mesa.Model):
         tag="dev"
     ):
         super().__init__(seed=seed)
+
+        # --- CACHE INITIALIZATION ---
+        self._agents_by_id_cache = None
 
         self.dev_mode = dev_mode
         self.db_logger = db_logger
@@ -95,6 +104,7 @@ class SugarscapeG1mt(mesa.Model):
                 "agent_re_spawn": int(agent_re_spawn),
                 "sugar_regrowth_rate": sugar_regrowth_rate,
                 "investments_enabled": int(investments_enabled),
+                "lending_enabled": int(lending_enabled),
                 "investment_portfolio_name": investment_portfolio_name,
                 "investment_json_path": investment_json_path,
                 "endowment_min": endowment_min, "endowment_max": endowment_max,
@@ -102,6 +112,8 @@ class SugarscapeG1mt(mesa.Model):
                 "vision_min": vision_min, "vision_max": vision_max,
                 "agent_age_min": agent_age_min, "agent_age_max": agent_age_max,
                 "agent_look_ahead_horizon": agent_look_ahead_horizon,
+                "lender_vision": lender_vision,
+                "lender_look_ahead_horizon": lender_look_ahead_horizon,
                 "log_agent_data": int(log_agent_data),
             }
 
@@ -114,6 +126,7 @@ class SugarscapeG1mt(mesa.Model):
         self.agent_re_spawn = agent_re_spawn
         self.sugar_regrowth_rate = sugar_regrowth_rate
         self.investments_enabled = investments_enabled
+        self.lending_enabled = lending_enabled
         self.endowment_min = endowment_min
         self.endowment_max = endowment_max
         self.metabolism_min = metabolism_min
@@ -125,6 +138,8 @@ class SugarscapeG1mt(mesa.Model):
         self.agent_expected_lifespan = (agent_age_min + agent_age_max) / 2
         self.agent_look_ahead_horizon = agent_look_ahead_horizon
         self.log_agent_data = log_agent_data
+        self.lender_vision = lender_vision
+        self.lender_look_ahead_horizon = lender_look_ahead_horizon
 
         self.running = True
 
@@ -142,6 +157,9 @@ class SugarscapeG1mt(mesa.Model):
                 "Average Metabolism": lambda m: np.mean([a.get_capability('metabolism_sugar') for a in m.agents]) if m.agents else 0,
                 "Gini": Gini,
                 "Deaths": lambda m: getattr(m, 'deaths_this_step', 0),
+                "Active Loan Count": lambda m: sum(1 for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE),
+                "Total Loan Principal": lambda m: sum(c.principal for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE),
+                "Ledger": lambda m: m.get_ledger_snapshot(),
             },
         )
 
@@ -149,6 +167,10 @@ class SugarscapeG1mt(mesa.Model):
         self.grid.add_property_layer(
             PropertyLayer.from_data("sugar", self.sugar_distribution)
         )
+        
+        self.contracts_by_id = {}
+        self.contracts_by_agent = defaultdict(set)
+        self.next_contract_id = 0
 
         if self.db_logger and self.run_id is not None:
             self.db_logger.log_static_run_parameter(
@@ -176,8 +198,54 @@ class SugarscapeG1mt(mesa.Model):
             expected_lifespan=self.agent_expected_lifespan,
             agent_look_ahead_horizon=self.agent_look_ahead_horizon,
             opportunities=self._create_agent_opportunities(),
-            investments_enabled=self.investments_enabled
+            investments_enabled=self.investments_enabled,
+            lending_enabled=self.lending_enabled,
+            lender_vision=self.lender_vision,
+            lender_look_ahead_horizon=self.lender_look_ahead_horizon
         )
+    
+    # --- LAZY-LOADED CACHE GETTER ---
+    def get_agent_by_id(self, agent_id):
+        """
+        Efficiently finds an agent by its ID using a lazily-loaded,
+        step-specific cache.
+        """
+        # If the cache hasn't been built for this step yet...
+        if self._agents_by_id_cache is None:
+            # ...build it now by iterating through all agents once.
+            self._agents_by_id_cache = {agent.unique_id: agent for agent in self.agents}
+
+        # Now, perform a fast dictionary lookup from the cache.
+        return self._agents_by_id_cache.get(agent_id) # .get() is safer than []
+
+    def register_contract(self, draft_contract: Contract) -> int:
+        new_id = self.next_contract_id
+        draft_contract.status = ContractStatus.ACTIVE
+        self.contracts_by_id[new_id] = draft_contract
+        self.contracts_by_agent[draft_contract.creditor_id].add(new_id)
+        self.contracts_by_agent[draft_contract.debtor_id].add(new_id)
+        self.next_contract_id += 1
+        return new_id
+
+    def update_contract_status(self, contract_id: int, new_status: ContractStatus):
+        """Safely updates a contract's status and cleans the index if it becomes inactive."""
+        if contract_id in self.contracts_by_id:
+            contract = self.contracts_by_id[contract_id]
+            contract.status = new_status
+
+            if new_status in [ContractStatus.REPAID, ContractStatus.DEFAULTED]:
+                self.contracts_by_agent[contract.creditor_id].discard(contract_id)
+                self.contracts_by_agent[contract.debtor_id].discard(contract_id)
+    
+    def get_ledger_snapshot(self) -> str:
+        """Serializes the current state of the contract book to a JSON string."""
+        serializable_ledger = {}
+        for contract_id, contract_obj in self.contracts_by_id.items():
+            contract_dict = asdict(contract_obj)
+            contract_dict['contract_type'] = contract_dict['contract_type'].name
+            contract_dict['status'] = contract_dict['status'].name
+            serializable_ledger[contract_id] = contract_dict
+        return json.dumps(serializable_ledger)
 
     def _load_investment_portfolio(self):
         """Loads and builds the active investment portfolio from a JSON file."""
@@ -240,13 +308,19 @@ class SugarscapeG1mt(mesa.Model):
             expected_lifespan=self.agent_expected_lifespan,
             agent_look_ahead_horizon=self.agent_look_ahead_horizon,
             opportunities=self._create_agent_opportunities(),
-            investments_enabled=self.investments_enabled
+            investments_enabled=self.investments_enabled,
+            lending_enabled=self.lending_enabled,
+            lender_vision=self.lender_vision,
+            lender_look_ahead_horizon=self.lender_look_ahead_horizon
         )
 
     def step(self):
         """
         A unique step function that does staged activation.
         """
+        # --- RESET THE CACHE ---
+        self._agents_by_id_cache = None
+
         self.grid.sugar.data = np.minimum(
             self.grid.sugar.data + self.sugar_regrowth_rate, self.sugar_distribution
         )

@@ -1,0 +1,109 @@
+# ==============================================================================
+# PowerShell Script to run a batch of Sugarscape experiments
+# ==============================================================================
+#
+# Description:
+# This script executes a series of `run_batch.py` commands in sequence.
+# It manually times each command to allow for real-time console output
+# from the python script, which is buffered by PowerShell's Measure-Command.
+# It reports individual and total runtimes in hh:mm:ss format.
+#
+# How to Run:
+# 1. Open a PowerShell terminal.
+# 2. Navigate to the `.../mesa/examples/advanced/` directory.
+# 3. Run the script by typing: .\sugarscape_g1mt\run_experiments.ps1
+#
+# ==============================================================================
+
+# --- Set Correct Working Directory ---
+# $PSScriptRoot is an automatic variable that contains the directory of this script.
+# We need to run python from the parent directory of this script for the
+# `python -m sugarscape_g1mt` command to work correctly.
+$scriptDir = $PSScriptRoot
+$projectRoot = (Get-Item -Path $scriptDir).Parent.FullName
+Set-Location -Path $projectRoot
+Write-Host "Working directory set to: $projectRoot" -ForegroundColor Gray
+
+
+# Start a timer for the total batch runtime
+$total_start_time = Get-Date
+Clear-Host
+Write-Host ">>> Starting full experiment batch at $total_start_time" -ForegroundColor Green
+Write-Host "-------------------------------------------------------------"
+
+# --- Experiment 1: Baseline (No Investments, No Lending) ---
+Write-Host "`n[1/3] Running: Baseline Experiment..." -ForegroundColor Cyan
+$run1_start = Get-Date
+
+# Run the command directly to get real-time output
+python -m sugarscape_g1mt.run_batch --run_group "baseline" `
+    --steps 500 `
+    --replications 1 `
+    --initial_population "[100,200,300,400]" `
+    --agent_re_spawn true `
+    --metabolism "[3.1, 3.1]" `
+    --vision "[1, 1]" `
+    --endowment "[5, 5]" `
+    --log_agent_data true `
+    --age "[1000,1000]" `
+    --investments_enabled false `
+    --tag prod `
+    --lending_enabled false *>&1
+
+$run1_duration = (Get-Date) - $run1_start
+Write-Host ("`n`t- Baseline run finished in {0}" -f $run1_duration.ToString('hh\:mm\:ss')) -ForegroundColor Yellow
+Write-Host "-------------------------------------------------------------"
+
+
+# --- Experiment 2: Investments Enabled (No Lending) ---
+Write-Host "`n[2/3] Running: Investments-Enabled Experiment..." -ForegroundColor Cyan
+$run2_start = Get-Date
+
+python -m sugarscape_g1mt.run_batch --run_group "baseline_investments" `
+    --steps 500 `
+    --replications 1 `
+    --initial_population "[100,200,300,400]" `
+    --agent_re_spawn true `
+    --metabolism "[3.1, 3.1]" `
+    --vision "[1, 1]" `
+    --endowment "[5, 5]" `
+    --log_agent_data true `
+    --age "[1000,1000]" `
+    --investments_enabled true `
+    --tag prod `
+    --lending_enabled false *>&1
+
+$run2_duration = (Get-Date) - $run2_start
+Write-Host ("`n`t- Investments run finished in {0}" -f $run2_duration.ToString('hh\:mm\:ss')) -ForegroundColor Yellow
+Write-Host "-------------------------------------------------------------"
+
+
+# --- Experiment 3: Investments and Lending Enabled ---
+Write-Host "`n[3/3] Running: Lending-Enabled Experiment..." -ForegroundColor Cyan
+$run3_start = Get-Date
+
+python -m sugarscape_g1mt.run_batch --run_group "baseline_lending" `
+    --steps 500 `
+    --replications 1 `
+    --initial_population "[100,200,300,400]" `
+    --agent_re_spawn true `
+    --metabolism "[3.1, 3.1]" `
+    --vision "[1, 1]" `
+    --endowment "[5, 5]" `
+    --log_agent_data true `
+    --age "[1000,1000]" `
+    --investments_enabled true `
+    --tag prod `
+    --lending_enabled true *>&1
+
+$run3_duration = (Get-Date) - $run3_start
+Write-Host ("`n`t- Lending run finished in {0}" -f $run3_duration.ToString('hh\:mm\:ss')) -ForegroundColor Yellow
+Write-Host "-------------------------------------------------------------"
+
+
+# --- Calculate and Display Total Runtime ---
+$total_end_time = Get-Date
+$total_duration = $total_end_time - $total_start_time
+
+Write-Host ("`n>>> Full experiment batch finished at $total_end_time") -ForegroundColor Green
+Write-Host ("`nTotal Batch Runtime: {0}" -f $total_duration.ToString('hh\:mm\:ss')) -ForegroundColor Green
