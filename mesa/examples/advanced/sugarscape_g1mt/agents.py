@@ -244,6 +244,13 @@ class Trader(CellAgent):
         if self.spoilage_rate > 0:
             self.sugar *= (1 - self.spoilage_rate)
 
+    def _update_lifecycle_and_metabolize(self):
+        """Handles end-of-step biological processes."""
+        self.age += 1
+        self.apply_spoilage()
+        self.metabolize()
+        self.maybe_die()
+
     def step(self):
         """Main step logic for the agent."""
         self.process_contract_maturities()
@@ -357,10 +364,8 @@ class Trader(CellAgent):
                 self.move()
                 self.eat()
 
-        self.age += 1
-        self.apply_spoilage()
-        self.metabolize()
-        self.maybe_die()
+        self._update_lifecycle_and_metabolize()
+
 
     def move(self):
         """Moves the agent to the best foraging cell in its vision."""

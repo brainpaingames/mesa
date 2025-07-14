@@ -11,6 +11,7 @@ The simulation's architecture is built on the principle of a **Central Ledger** 
 Key features of this simulation framework include:
 -   **Peer-to-Peer Lending:** Agents can now borrow and lend sugar to facilitate investments, allowing for the emergence of a basic credit market.
 -   **Centralized Contract Ledger:** All loans are recorded as `Contract` objects in a central book owned by the model, ensuring data integrity.
+-   **Centralized Configuration:** All default simulation parameters are stored in a single `config.json` file, making the model and batch runner easy to configure and preventing parameter duplication.
 -   **Configurable Mechanics:** Both investing and the new lending market can be enabled or disabled via flags (`--investments-enabled`, `--lending-enabled`) for controlled, comparative experiments.
 -   **Rational Economic Choice:** Agents evaluate a full menu of possible actions—foraging, self-funded investing, and loan-funded investing—and select the option that maximizes their utility based on look-ahead simulations.
 -   **Rigorous Database Logging:** All simulation runs are logged to a SQLite database (`simulation_results.db`), recording run metadata, parameters, and step-by-step aggregate data, including the full state of the financial ledger at each step.
@@ -78,7 +79,7 @@ streamlit run sugarscape_g1mt/dashboard.py
 
 ### Single Batch Experiments (Command-Line)
 
-The `run_batch.py` script is used for running one or more simulations without the GUI, with all results logged to the database.
+The `run_batch.py` script is used for running one or more simulations without the GUI, with all results logged to the database. It is now fully configured via `sugarscape_g1mt/config.json`, though all parameters can be overridden from the command line.
 
 *   **Command Structure:**
     ```bash
@@ -86,7 +87,7 @@ The `run_batch.py` script is used for running one or more simulations without th
     ```
 *   **Example (Single Run with Lending):**
     ```bash
-    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Lending_Enabled_Run" --lending_enabled true --lender_vision 10
+    python -m sugarscape_g1mt.run_batch --total_steps 1000 --run_group "Lending_Enabled_Run" --lending_enabled true --lender_vision 10
     ```
 *   **Example (Parameter Sweep):**
     ```bash
@@ -153,12 +154,14 @@ C:.
 │   run_experiments.ps1     # PowerShell script to run experiment series
 │   database_logger.py      # Class for logging all data to SQLite
 │
+│   config.json             # Central configuration for all default parameters
 │   investments.json        # External definitions for all investment opportunities
 │   investment.py           # Defines the InvestmentOpportunity & SimulatedAgent classes
 │   contracts.py            # Defines the Contract data object
 │
 │   dashboard.py            # Main entry point for the Streamlit dashboard
 │   analysis_helpers.py     # Data-querying functions for the dashboard
+│   utils.py                # Generic helper functions (Gini, config loader, etc.)
 │
 │   sugar-map.txt           # Defines the static sugar landscape
 │   simulation_results.db   # The SQLite database for simulation results
@@ -179,24 +182,36 @@ C:.
 
 The project is currently focused on a major structural refactoring to improve code quality and maintainability, followed by the incremental introduction of new financial mechanics.
 
-### **Active Sprint: Comprehensive Structural Refactoring**
+### **COMPLETED: Comprehensive Structural Refactoring**
 
-The immediate priority is a refactoring sprint to centralize configuration and improve code modularity. This will not change the simulation's behavior but will make future development significantly easier and more robust.
+This sprint successfully centralized configuration and improved code modularity, making future development significantly easier and more robust.
 
-*   **Step 1: Create `utils.py` and Move `Gini` & `get_distance`**
-    *   **Action:** Create `sugarscape_g1mt/utils.py`. Move `Gini()` from `model.py` and `get_distance()` from `agents.py` into `utils.py`. Update the original files to import them.
+*   **DONE:** Created `utils.py` and moved `Gini` & `get_distance` into it.
+*   **DONE:** Created `config.json` to hold all default simulation parameters.
+*   **DONE:** Added a `load_config()` utility to `utils.py`.
+*   **DONE:** Refactored `run_batch.py` to be dynamically configured from `config.json`.
+*   **DONE:** Refactored `model.py` to load its configuration from `config.json`, simplifying its constructor.
 
-*   **Step 2: Create `config.json` and `load_config` Utility**
-    *   **Action:** Create `sugarscape_g1mt/config.json` to hold all default simulation parameters. Add a `load_config()` function to `utils.py` to read this file.
+### **Active Sprint: Refactor Agent `step()` Method**
 
-*   **Step 3: Refactor `run_batch.py` to Use `config.json`**
-    *   **Action:** Remove the hard-coded `DEFAULT_PARAMS` dictionary in `run_batch.py` and replace it with a call to `utils.load_config()`.
+With the model configuration refactored, the next priority is to improve the internal structure of the `Trader` agent itself. The current `step()` method is a large, monolithic block of logic that is difficult to read, test, and extend.
 
-*   **Step 4: Refactor `model.py` to Use `config.json`**
-    *   **Action:** Simplify the `SugarscapeG1mt.__init__` signature. Inside `__init__`, load defaults from `config.json` and merge them with any arguments passed to the constructor.
-
-*   **Step 5: Refactor `agents.py` with a Pipelined `step()` Method**
-    *   **Action:** Rewrite the monolithic `Trader.step()` method into a high-level pipeline that calls a sequence of new, private helper methods (`_perform_housekeeping`, `_assess_opportunities`, `_choose_best_action`, `_execute_action`, `_update_lifecycle`).
+*   **Action: Refactor `agents.py` with a Pipelined `step()` Method**
+    *   Rewrite the monolithic `Trader.step()` method into a high-level pipeline that calls a sequence of new, private helper methods. This will dramatically improve readability and maintainability.
+    *   The new structure will look like this:
+        ```python
+        def step(self):
+            self._perform_housekeeping()
+            
+            if self.is_investing:
+                self._process_active_investment()
+            else:
+                best_action = self._evaluate_and_choose_action()
+                self._execute_action(best_action)
+                
+            self._update_lifecycle_and_metabolize()
+        ```
+    *   This will involve creating new private methods like `_perform_housekeeping`, `_evaluate_and_choose_action`, `_execute_action`, etc.
 
 ### **Next Up: New Features (Post-Refactoring)**
 
@@ -262,24 +277,24 @@ self.model.db_logger.debug(self.model.run_id, json.dumps(decision_log))
 When a bug or unexpected behavior is reported, you are FORBIDDEN from speculating about the cause or proposing a code fix. Your first and only response MUST follow this diagnostic funnel:
     a. **Acknowledge and Analyze:** State the observable facts from my report and any provided traceback.
     b. **Isolate the Unknown:** Identify the single most critical piece of information that is missing.
-    c. **Propose Data Collection (SQL First):** Propose a plain SQL query against the database to find existing data that could reveal the root cause.
-    d. **Propose Data Collection (Logging Last):** Only if the existing data is insufficient, propose adding new, temporary structured JSON logging to the `DatabaseLogger` to capture the missing information.
+    c. **Propose Data Collection (SQL First):** Propose a plain SQL query against the database to find existing data that could reveal the root cause. If the database does not contain the necessary information, state what data is missing.
+    d. **Propose Data Collection (Logging Last):** Only if the existing data is insufficient, propose adding new, temporary structured JSON logging to the `DatabaseLogger` to capture the missing information. State clearly what questions this new data will answer.
     e. **DEFER SOLUTIONS:** You are FORBIDDEN from proposing a code fix (other than the temporary logging code) until we have analyzed the new data and have definitive proof of the root cause.
 
 **2. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
 All development MUST proceed in two distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
 
 *   **PHASE 1: DESIGN & IMPLEMENTATION PLAN.**
-    *   Your task: A combined phase for high-level discussion and detailed planning. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files.
+    *   Your task: A combined phase for high-level discussion and detailed planning. Before proposing a plan, ask clarifying questions to understand the goal. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files. Your plan must be broken down into the smallest possible logical steps.
     *   Your output MUST NOT contain the final, complete code.
     *   You MUST **HALT** and wait for my explicit approval to proceed (e.g., "The plan is approved," "Okay, proceed," "Go on").
 
 *   **PHASE 2: CODE GENERATION.**
-    *   Prerequisite: I must have approved the plan.
+    *   Prerequisite: I must have approved the plan from Phase 1.
     *   Your task: Generate the complete, final code for the required files. I will specify whether I want a single file at a time or all at once.
 
 **3. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
-Your goal is the cleanest possible `git diff`. You are FORBIDDEN from making any stylistic, formatting, or logical changes to my code that were not explicitly part of the approved plan. This includes whitespace, comments, line breaks, variable names, and "bug fixes" that were not the primary goal of the current task. Preserve the existing project style perfectly.
+Your goal is the cleanest possible `git diff`. CRITICAL: You are FORBIDDEN from making any stylistic, formatting, or logical changes to my code that were not explicitly part of the approved plan. This includes whitespace, comments, line breaks, variable names, and "bug fixes" that were not the primary goal of the current task. Preserve the existing project style perfectly. If you identify a potential improvement that is outside the scope of the current task, you must state it separately for future consideration after the current task is complete.
 
 **4. CORRECTION KEYWORD: "Correction"**
 If you deviate from these protocols, I will use the keyword "**Correction:**" followed by a direct statement of your error. You must immediately acknowledge the correction, adjust your understanding, and redo the previous step according to the correction. Do not be conversational.
