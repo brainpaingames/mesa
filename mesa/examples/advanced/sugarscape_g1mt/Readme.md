@@ -177,14 +177,34 @@ C:.
 
 ## Development Backlog
 
-### Immediate / Short-Term Tasks
--   **Extensive Testing:** Rigorously test the new lending functionality under various parameter settings.
--   **Refine Opportunity Cost:** The agent's calculation for its reservation interest amount should use the utility of its best *non-borrowing* alternative as the baseline, not just the foraging utility.
--   **Refactor `get_potential_harvest`:** Consolidate the duplicated logic for this method from `agents.py` and `investment.py` into a single function.
--   **Demand Deposits:** Implement a new `ContractType` for demand deposits, where agents can store sugar with others for a small return, and withdraw it at will.
+The project is currently focused on a major structural refactoring to improve code quality and maintainability, followed by the incremental introduction of new financial mechanics.
 
-### Long-Term Goals / Epics
--   **Heterogeneous Lenders:** Introduce logic for lenders to have different risk tolerances and reservation rates, creating a more dynamic market for loans.
+### **Active Sprint: Comprehensive Structural Refactoring**
+
+The immediate priority is a refactoring sprint to centralize configuration and improve code modularity. This will not change the simulation's behavior but will make future development significantly easier and more robust.
+
+*   **Step 1: Create `utils.py` and Move `Gini` & `get_distance`**
+    *   **Action:** Create `sugarscape_g1mt/utils.py`. Move `Gini()` from `model.py` and `get_distance()` from `agents.py` into `utils.py`. Update the original files to import them.
+
+*   **Step 2: Create `config.json` and `load_config` Utility**
+    *   **Action:** Create `sugarscape_g1mt/config.json` to hold all default simulation parameters. Add a `load_config()` function to `utils.py` to read this file.
+
+*   **Step 3: Refactor `run_batch.py` to Use `config.json`**
+    *   **Action:** Remove the hard-coded `DEFAULT_PARAMS` dictionary in `run_batch.py` and replace it with a call to `utils.load_config()`.
+
+*   **Step 4: Refactor `model.py` to Use `config.json`**
+    *   **Action:** Simplify the `SugarscapeG1mt.__init__` signature. Inside `__init__`, load defaults from `config.json` and merge them with any arguments passed to the constructor.
+
+*   **Step 5: Refactor `agents.py` with a Pipelined `step()` Method**
+    *   **Action:** Rewrite the monolithic `Trader.step()` method into a high-level pipeline that calls a sequence of new, private helper methods (`_perform_housekeeping`, `_assess_opportunities`, `_choose_best_action`, `_execute_action`, `_update_lifecycle`).
+
+### **Next Up: New Features (Post-Refactoring)**
+
+-   **Implement Demand Deposits:** Introduce a new `ContractType` for demand deposits. This will allow agents to act as "banks," accepting deposits from others, and will allow depositors to "call" their funds back at will. This will be added incrementally using the new, clean `step()` pipeline structure.
+
+### **Long-Term Goals / Epics**
+-   **Introduce a Bankruptcy Mechanism:** Create a formal process for handling agent insolvency. When an agent defaults on a called deposit, a model-level "trustee" will liquidate its assets (physical sugar and financial claims) and distribute them pro-rata to its creditors.
+-   **Introduce Transferable Assets & Collateral:** Allow `Contract` objects (like demand deposits) to be traded between agents as a form of payment or pledged as collateral for new loans, creating a form of endogenous money.
 -   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
 -   **Visual Regression Testing:** Implement a browser automation test suite (e.g., with Playwright) to test the Streamlit dashboard for visual correctness and prevent UI regressions.
 

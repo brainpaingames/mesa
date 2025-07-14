@@ -26,7 +26,7 @@ def test_smoke_and_aging():
     final_step = 14 # 15 steps means final step is 14
 
     test_params = {
-        "steps": "15",
+        "total_steps": "15",
         "run_group": run_group_name,
         "replications": "1",
         "seed": "1",
@@ -89,7 +89,7 @@ def test_lending_investment_and_helpers():
     run_group_name = f"E2E_Test_Lending_Investment_{timestamp}"
 
     test_params = {
-        "steps": "100",
+        "total_steps": "100",
         "run_group": run_group_name,
         "replications": "1",
         "seed": "42",
