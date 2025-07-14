@@ -34,6 +34,7 @@ def run_batch():
         "investment_json_path": "sugarscape_g1mt/investments.json",
         "lender_vision": 7,
         "lender_look_ahead_horizon": 20,
+        "agent_spoilage_rate": 0.0,
         "log_agent_data": False,
         "seed": 42,
         "tag": "dev",  # Default tag

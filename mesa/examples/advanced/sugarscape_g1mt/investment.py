@@ -54,6 +54,7 @@ class InvestmentOpportunity:
                         sim_agent.sugar -= contract.total_repayment_amount
             # --- End Ledger-Aware ---
 
+            sim_agent.sugar *= (1 - sim_agent.real_agent.spoilage_rate) # Sugar spoils
             sim_agent.sugar -= self.cost["metabolism_during_investment"]
             if sim_agent.sugar <= 0:
                 return -1, True # Agent dies during investment
@@ -78,6 +79,7 @@ class InvestmentOpportunity:
                 # --- End Ledger-Aware ---
 
                 sim_agent.sugar += expected_harvest
+                sim_agent.sugar *= (1 - sim_agent.real_agent.spoilage_rate) # Sugar spoils
                 sim_agent.sugar -= metabolism
                 if sim_agent.sugar <= 0:
                     return -1, True # Dies after investing, but before horizon ends

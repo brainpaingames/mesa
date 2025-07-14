@@ -61,6 +61,7 @@ class SugarscapeG1mt(mesa.Model):
         agent_look_ahead_horizon=15,
         lender_vision=7,
         lender_look_ahead_horizon=20,
+        agent_spoilage_rate=0.0,
         run_group="default",
         description="A simulation run.",
         log_agent_data=False,
@@ -80,6 +81,7 @@ class SugarscapeG1mt(mesa.Model):
         self.run_id = run_id
         self.investment_portfolio_name = investment_portfolio_name
         self.investment_json_path = investment_json_path
+        self.agent_spoilage_rate = agent_spoilage_rate
 
         # This block is now only executed when running without a batch script
         if not self.dev_mode and self.db_logger is None:
@@ -114,6 +116,7 @@ class SugarscapeG1mt(mesa.Model):
                 "agent_look_ahead_horizon": agent_look_ahead_horizon,
                 "lender_vision": lender_vision,
                 "lender_look_ahead_horizon": lender_look_ahead_horizon,
+                "agent_spoilage_rate": agent_spoilage_rate,
                 "log_agent_data": int(log_agent_data),
             }
 
@@ -201,7 +204,8 @@ class SugarscapeG1mt(mesa.Model):
             investments_enabled=self.investments_enabled,
             lending_enabled=self.lending_enabled,
             lender_vision=self.lender_vision,
-            lender_look_ahead_horizon=self.lender_look_ahead_horizon
+            lender_look_ahead_horizon=self.lender_look_ahead_horizon,
+            spoilage_rate=self.agent_spoilage_rate
         )
     
     # --- LAZY-LOADED CACHE GETTER ---
@@ -311,7 +315,8 @@ class SugarscapeG1mt(mesa.Model):
             investments_enabled=self.investments_enabled,
             lending_enabled=self.lending_enabled,
             lender_vision=self.lender_vision,
-            lender_look_ahead_horizon=self.lender_look_ahead_horizon
+            lender_look_ahead_horizon=self.lender_look_ahead_horizon,
+            spoilage_rate=self.agent_spoilage_rate
         )
 
     def step(self):

@@ -26,11 +26,12 @@ class Trader(CellAgent):
     - Can invest sugar to permanently reduce metabolism.
     """
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, lender_vision=7, lender_look_ahead_horizon=20):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, lender_vision=7, lender_look_ahead_horizon=20, spoilage_rate=0.0):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
         self.sugar = float(sugar)
+        self.spoilage_rate = float(spoilage_rate)
         self.max_age = int(max_age)
         self.expected_lifespan = float(expected_lifespan)
         self.age = 0
@@ -103,6 +104,8 @@ class Trader(CellAgent):
         my_metabolism = self.get_capability("metabolism_sugar")
         for _ in range(self.lender_look_ahead_horizon):
             sim_sugar += worst_case_harvest
+            # Lender must account for its own sugar spoiling
+            sim_sugar *= (1 - self.spoilage_rate)
             sim_sugar -= my_metabolism
         surplus_sugar = max(0, sim_sugar)
 
@@ -140,6 +143,7 @@ class Trader(CellAgent):
             "pos_x": pos_x,
             "pos_y": pos_y,
             "sugar": float(self.sugar),
+            "spoilage_rate": float(self.spoilage_rate),
             "metabolism": float(self.get_capability("metabolism_sugar")),
             "vision": int(self.get_capability("vision")),
             "age": float(self.age),
@@ -229,6 +233,7 @@ class Trader(CellAgent):
                         sim_sugar -= contract.total_repayment_amount
 
             sim_sugar += expected_harvest
+            sim_sugar *= (1 - self.spoilage_rate) # Sugar spoils
             sim_sugar -= metabolism
             if sim_sugar <= 0:
                 return -1, True
@@ -243,6 +248,11 @@ class Trader(CellAgent):
             sim_agent.sugar += loan.principal
         
         return investment_opp.calculate_utility(sim_agent, horizon, hypothetical_loan=loan)
+
+    def apply_spoilage(self):
+        """Applies percentage-based spoilage to the agent's sugar."""
+        if self.spoilage_rate > 0:
+            self.sugar *= (1 - self.spoilage_rate)
 
     def step(self):
         """Main step logic for the agent."""
@@ -358,6 +368,7 @@ class Trader(CellAgent):
                 self.eat()
 
         self.age += 1
+        self.apply_spoilage()
         self.metabolize()
         self.maybe_die()
 
