@@ -1,3 +1,5 @@
+# sugarscape_g1mt/model.py
+
 from pathlib import Path
 import numpy as np
 import mesa
@@ -10,7 +12,7 @@ import json
 from .database_logger import DatabaseLogger
 from .investment import InvestmentOpportunity
 from collections import defaultdict
-from .contracts import Contract, ContractStatus
+from .contracts import Contract, ContractStatus, ContractType
 from dataclasses import asdict
 from .utils import Gini, load_config
 
@@ -94,8 +96,10 @@ class SugarscapeG1mt(mesa.Model):
                 "Average Metabolism": lambda m: np.mean([a.get_capability('metabolism_sugar') for a in m.agents]) if m.agents else 0,
                 "Gini": Gini,
                 "Deaths": lambda m: getattr(m, 'deaths_this_step', 0),
-                "Active Loan Count": lambda m: sum(1 for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE),
-                "Total Loan Principal": lambda m: sum(c.principal for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE),
+                "Active Loan Count": lambda m: sum(1 for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE and c.contract_type == ContractType.TERM_LOAN),
+                "Total Loan Principal": lambda m: sum(c.principal for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE and c.contract_type == ContractType.TERM_LOAN),
+                "Active Deposit Count": lambda m: sum(1 for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE and c.contract_type == ContractType.DEMAND_DEPOSIT),
+                "Total Deposit Principal": lambda m: sum(c.current_principal for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE and c.contract_type == ContractType.DEMAND_DEPOSIT),
                 "Ledger": lambda m: m.get_ledger_snapshot(),
             },
         )
@@ -137,6 +141,8 @@ class SugarscapeG1mt(mesa.Model):
             opportunities=self._create_agent_opportunities(),
             investments_enabled=self.investments_enabled,
             lending_enabled=self.lending_enabled,
+            deposits_enabled=self.deposits_enabled,
+            deposit_buffer_horizon=self.deposit_buffer_horizon,
             lender_vision=self.lender_vision,
             lender_look_ahead_horizon=self.lender_look_ahead_horizon,
             spoilage_rate=self.agent_spoilage_rate
@@ -148,13 +154,9 @@ class SugarscapeG1mt(mesa.Model):
         Efficiently finds an agent by its ID using a lazily-loaded,
         step-specific cache.
         """
-        # If the cache hasn't been built for this step yet...
         if self._agents_by_id_cache is None:
-            # ...build it now by iterating through all agents once.
             self._agents_by_id_cache = {agent.unique_id: agent for agent in self.agents}
-
-        # Now, perform a fast dictionary lookup from the cache.
-        return self._agents_by_id_cache.get(agent_id) # .get() is safer than []
+        return self._agents_by_id_cache.get(agent_id)
 
     def register_contract(self, draft_contract: Contract) -> int:
         new_id = self.next_contract_id
@@ -171,19 +173,51 @@ class SugarscapeG1mt(mesa.Model):
             contract = self.contracts_by_id[contract_id]
             contract.status = new_status
 
-            if new_status in [ContractStatus.REPAID, ContractStatus.DEFAULTED]:
+            if new_status in [ContractStatus.REPAID, ContractStatus.DEFAULTED, ContractStatus.CLOSED]:
                 self.contracts_by_agent[contract.creditor_id].discard(contract_id)
                 self.contracts_by_agent[contract.debtor_id].discard(contract_id)
-    
+
+    def process_deposit_call(self, contract_id: int, contract_to_call: Contract, amount_to_call: float):
+        """
+        Authoritative function to process a (potentially fractional) deposit withdrawal.
+        """
+        creditor = self.get_agent_by_id(contract_to_call.creditor_id)
+        debtor = self.get_agent_by_id(contract_to_call.debtor_id)
+
+        # Ensure both parties are still in the simulation
+        if not creditor or not debtor:
+            return
+
+        # Sanity checks
+        if amount_to_call <= 0:
+            return
+        if amount_to_call > contract_to_call.current_principal:
+            amount_to_call = contract_to_call.current_principal # Failsafe
+
+        payment = min(amount_to_call, debtor.sugar)
+        
+        debtor.sugar -= payment
+        creditor.sugar += payment
+        contract_to_call.current_principal -= payment
+
+        if payment < amount_to_call:
+            # Debtor defaulted on the call, but we record the partial payment.
+            # A future bankruptcy epic would handle the remaining claim.
+            pass
+
+        if contract_to_call.current_principal <= 0:
+            self.update_contract_status(contract_id, ContractStatus.CLOSED)
+
     def get_ledger_snapshot(self) -> str:
         """Serializes the current state of the contract book to a JSON string."""
         serializable_ledger = {}
         for contract_id, contract_obj in self.contracts_by_id.items():
             contract_dict = asdict(contract_obj)
+            # Convert enums to strings for JSON compatibility
             contract_dict['contract_type'] = contract_dict['contract_type'].name
             contract_dict['status'] = contract_dict['status'].name
             serializable_ledger[contract_id] = contract_dict
-        return json.dumps(serializable_ledger)
+        return json.dumps(serializable_ledger, indent=2)
 
     def _load_investment_portfolio(self):
         """Loads and builds the active investment portfolio from a JSON file."""
@@ -220,7 +254,6 @@ class SugarscapeG1mt(mesa.Model):
 
     def _add_new_agent(self):
         """Helper method to add a single new agent to the model."""
-
         empty_cells = [cell for cell in self.grid.all_cells.cells if cell.is_empty]
         if not empty_cells:
             return
@@ -248,6 +281,8 @@ class SugarscapeG1mt(mesa.Model):
             opportunities=self._create_agent_opportunities(),
             investments_enabled=self.investments_enabled,
             lending_enabled=self.lending_enabled,
+            deposits_enabled=self.deposits_enabled,
+            deposit_buffer_horizon=self.deposit_buffer_horizon,
             lender_vision=self.lender_vision,
             lender_look_ahead_horizon=self.lender_look_ahead_horizon,
             spoilage_rate=self.agent_spoilage_rate
@@ -257,7 +292,6 @@ class SugarscapeG1mt(mesa.Model):
         """
         A unique step function that does staged activation.
         """
-        # --- RESET THE CACHE ---
         self._agents_by_id_cache = None
 
         self.grid.sugar.data = np.minimum(

@@ -1,4 +1,5 @@
 # sugarscape_g1mt/strategies.py
+
 from __future__ import annotations
 import math
 import json
@@ -57,7 +58,7 @@ class Strategy:
         naked_utility, _ = self._simulate_plan(agent, naked_plan)
         candidate_plans.append((naked_utility, naked_plan))
         
-        # --- Pre-Action Analysis (The "Enablers" and "Optimizers") ---
+        # --- Pre-Action Analysis (The "Enablers") ---
         potential_enablers = self.core_action.get_enabler_action_types()
         available_enablers = [ptype for ptype in potential_enablers if ptype in self.pre_action_kit]
 
@@ -75,15 +76,44 @@ class Strategy:
                 new_utility, _ = self._simulate_plan(agent, new_plan)
                 candidate_plans.append((new_utility, new_plan))
         
-        # --- Post-Action Analysis (The "Optimizers") ---
-        # (This phase is currently a placeholder, ready for deposit logic)
-        # It would take the best plans so far and try to add post-actions.
-
-        # --- Find the best overall plan ---
-        best_utility, best_plan = max(candidate_plans, key=lambda item: item[0])
+        # --- Find the best core plan (with or without pre-actions) ---
+        best_core_utility, best_core_plan = max(candidate_plans, key=lambda item: item[0])
         
-        self.utility = best_utility
-        self.final_plan = best_plan
+        # --- Post-Action Analysis (The "Optimizers" and "Rebalancers") ---
+        current_best_plan = best_core_plan
+        current_best_utility = best_core_utility
+        
+        if self.post_action_kit and current_best_utility > -math.inf:
+            # First, get the simulated state *after* the best core plan has run
+            _, final_sim_agent_state = self._simulate_plan(agent, current_best_plan)
+
+            for post_action_type in self.post_action_kit:
+                # Ask the PostAction class to find an instance of itself based on the final state
+                post_action = post_action_type.find_best_instance(
+                    agent=agent, 
+                    sim_agent_state=final_sim_agent_state, 
+                    core_action_utility=current_best_utility
+                )
+
+                if post_action:
+                    # If a beneficial post-action is found, simulate it and update the plan
+                    # Note: We are currently only evaluating ONE post-action, not chains.
+                    # The simulation is based on the state *before* this post-action.
+                    new_plan_with_post_action = current_best_plan + [post_action]
+                    new_utility, _ = self._simulate_plan(agent, new_plan_with_post_action)
+                    
+                    if new_utility > current_best_utility:
+                        # This logic is intentionally simple for now: if a post-action
+                        # improves things, we adopt it. It doesn't re-evaluate other post-actions.
+                        current_best_utility = new_utility
+                        current_best_plan = new_plan_with_post_action
+                        # We also need to update the sim_agent_state for the next iteration
+                        _, final_sim_agent_state = self._simulate_plan(agent, current_best_plan)
+
+
+        # --- Finalize the strategy's outcome ---
+        self.utility = current_best_utility
+        self.final_plan = current_best_plan
         self.is_evaluated = True
         
         return self.utility

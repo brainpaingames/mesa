@@ -16,7 +16,8 @@
     "agent_re_spawn": false,
     "sugar_regrowth_rate": 1.0,
     "investments_enabled": true,
-    "lending_enabled": true
+    "lending_enabled": true,
+    "deposits_enabled": true
   },
   "agent_params": {
     "endowment": [15, 15],
@@ -24,7 +25,8 @@
     "vision": [1, 6],
     "age": [60, 100],
     "agent_look_ahead_horizon": 25,
-    "agent_spoilage_rate": 0.0
+    "agent_spoilage_rate": 0.0,
+    "deposit_buffer_horizon": 5
   },
   "financial_params": {
     "investment_portfolio_name": "default",
