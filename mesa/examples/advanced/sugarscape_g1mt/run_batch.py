@@ -5,47 +5,41 @@ import subprocess
 import datetime
 from .model import SugarscapeG1mt
 from .database_logger import DatabaseLogger
+from .utils import load_config
 
 def flexible_type(value):
     """
-    Tries to parse the value as JSON (for lists, bools, numbers),
-    otherwise returns it as a string.
+    Tries to parse the value as JSON (for lists/bools), then as a number,
+    otherwise returns it as a string. This ensures that command-line
+    arguments like "15" become integers, not strings.
     """
+    # First, try to parse as JSON for complex types like lists or booleans
     try:
         return json.loads(value)
     except (json.JSONDecodeError, TypeError):
-        return value
+        # If not JSON, it might be a simple number or a string
+        pass
+
+    # Next, try to cast to a number (int first, then float)
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            # If all else fails, it's a string
+            return value
 
 def run_batch():
     # --- 1. Define Default Parameters ---
-    DEFAULT_PARAMS = {
-        "width": 50, "height": 50,
-        "initial_population": 400,
-        "agent_re_spawn": False,
-        "sugar_regrowth_rate": 1.0,
-        "endowment": [15, 15],
-        "metabolism": [1, 4],
-        "vision": [1, 6],
-        "age": [60, 100],
-        "agent_look_ahead_horizon": 25,
-        "investments_enabled": True,
-        "lending_enabled": True,
-        "investment_portfolio_name": "default",
-        "investment_json_path": "sugarscape_g1mt/investments.json",
-        "lender_vision": 7,
-        "lender_look_ahead_horizon": 20,
-        "log_agent_data": False,
-        "seed": 42,
-        "tag": "dev",  # Default tag
-    }
+    config = load_config()
+    DEFAULT_PARAMS = {}
+    for section in config.values():
+        DEFAULT_PARAMS.update(section)
 
     # --- 2. Set up Argument Parser ---
     parser = argparse.ArgumentParser(description="Run batch experiments for the Sugarscape model.")
-    parser.add_argument("--replications", type=int, default=1, help="Number of times to run each parameter combination.")
-    parser.add_argument("--steps", type=int, default=1000, help="Number of steps to run each simulation for.")
-    parser.add_argument("--run_group", type=str, default="CLI_Batch_Run", help="A group name for this entire batch of runs.")
-    parser.add_argument("--db", default="sugarscape_g1mt/simulation_results.db", help="Path to the simulation results database.")
-
+    # Dynamically create all arguments from the config file
     for key, value in DEFAULT_PARAMS.items():
         parser.add_argument(f"--{key}", type=flexible_type, default=json.dumps(value),
                             help=f"Set value(s) for '{key}'. Default: {value}")
@@ -56,17 +50,21 @@ def run_batch():
     param_space = {}
     cli_args = vars(args)
 
+    # This block requires a list of default keys that are part of the model/run itself.
+    # We must exclude the runner controls from being considered for sweeping.
+    MODEL_AND_RUN_PARAMS = {k: v for k, v in DEFAULT_PARAMS.items() if k not in ['replications', 'total_steps', 'db']}
+
     for key, value in cli_args.items():
-        if key in DEFAULT_PARAMS:
+        if key in MODEL_AND_RUN_PARAMS:
             is_list_of_lists = isinstance(value, list) and len(value) > 0 and isinstance(value[0], list)
             is_simple_list_for_sweep = isinstance(value, list) and key not in ["endowment", "metabolism", "vision", "age"]
 
             if is_list_of_lists or is_simple_list_for_sweep:
                 param_space[key] = value
 
-    final_fixed_params = DEFAULT_PARAMS.copy()
+    final_fixed_params = MODEL_AND_RUN_PARAMS.copy()
     for key, value in cli_args.items():
-        if key in DEFAULT_PARAMS and key not in param_space:
+        if key in MODEL_AND_RUN_PARAMS and key not in param_space:
              final_fixed_params[key] = value
 
     # --- 4. Generate and Run Simulations ---
@@ -124,7 +122,7 @@ def run_batch():
             model_init_params.update({"db_logger": logger, "run_id": run_id})
 
             model = SugarscapeG1mt(**model_init_params)
-            model.run_model(step_count=args.steps)
+            model.run_model(step_count=args.total_steps)
 
             logger.info(run_id, f"--- Finished run {run_counter}/{total_runs} ---")
 

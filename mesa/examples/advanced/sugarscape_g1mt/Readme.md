@@ -11,13 +11,21 @@ The simulation's architecture is built on the principle of a **Central Ledger** 
 Key features of this simulation framework include:
 -   **Peer-to-Peer Lending:** Agents can now borrow and lend sugar to facilitate investments, allowing for the emergence of a basic credit market.
 -   **Centralized Contract Ledger:** All loans are recorded as `Contract` objects in a central book owned by the model, ensuring data integrity.
+-   **Centralized Configuration:** All default simulation parameters are stored in a single `config.json` file, making the model and batch runner easy to configure and preventing parameter duplication.
 -   **Configurable Mechanics:** Both investing and the new lending market can be enabled or disabled via flags (`--investments-enabled`, `--lending-enabled`) for controlled, comparative experiments.
--   **Rational Economic Choice:** Agents evaluate a full menu of possible actions—foraging, self-funded investing, and loan-funded investing—and select the option that maximizes their utility based on look-ahead simulations.
+-   **Rational Economic Choice via Strategy Engine:** Agents now use a sophisticated, object-oriented decision-making engine. They evaluate a list of "core strategies" (e.g., Foraging, Investing) and the engine dynamically finds the optimal combination of "enabling" actions (like taking a loan) to produce the best possible outcome.
 -   **Rigorous Database Logging:** All simulation runs are logged to a SQLite database (`simulation_results.db`), recording run metadata, parameters, and step-by-step aggregate data, including the full state of the financial ledger at each step.
 -   **Reproducibility:** The model requires a clean Git repository, ensuring all logged results are tied to a specific commit hash.
 -   **Multi-Page Analysis Dashboard:** A powerful Streamlit dashboard provides multiple views for deep analysis of results.
 
 ## Key Concepts & Architecture
+
+### The Strategy/Action Decision Engine
+
+The agent's "brain" has been refactored into a formal, object-oriented architecture to support complex, multi-step financial planning.
+-   **`Action` Classes:** These are the fundamental "verbs" of the simulation (e.g., `ForageAction`, `InvestAction`, `TakeLoanAction`). Each `Action` class is an expert at its one job, knowing how to simulate its own impact and execute itself. Crucially, "enabler" actions like `TakeLoanAction` also contain a `find_best_instance` class method, which encapsulates the complex logic of discovering the parameters for that action (e.g., polling for lenders, negotiating interest).
+-   **The `Strategy` Class:** This is a generic "thinking engine." It is initialized with a "core action" (a goal) and a "tool-kit" of available action types. Its `evaluate()` method then runs a simulation to find the optimal sequence of actions—including pre-actions from its tool-kit—to best achieve the goal. It is a generic planner that knows nothing specific about loans or deposits, only how to combine actions and compare outcomes.
+-   **The `Trader` Agent:** The agent itself is now a high-level orchestrator. Its `_find_best_plan()` method assembles the tool-kit of available actions based on simulation flags (e.g., `lending_enabled`), generates a list of candidate `Strategy` objects, and then runs a "tournament" to find the one with the highest utility. It then executes the winning strategy's action plan.
 
 ### Dynamic Investments
 
@@ -31,7 +39,7 @@ The lending system is built on a "Dumb Data, Smart Agent" philosophy.
 
 -   **The `Contract` Object:** All financial agreements are represented by a simple `Contract` data object (defined in `contracts.py`). This object holds the "facts" of an agreement (creditor, debtor, principal, term) but contains no complex behavioral logic.
 -   **The Central Ledger:** The model owns a single, authoritative ledger of all contracts. This ledger is indexed for high-performance lookups, preventing data duplication and ensuring integrity. It serves as the single source of truth for all financial obligations.
--   **Agent-Based Rules:** All intelligence resides within the `Trader` agents. Their `step()` method contains the rules for how they interact with the ledger. This includes evaluating opportunities, deciding whether to seek a loan, polling potential lenders, and finalizing loan agreements.
+-   **Agent-Based Rules:** All intelligence resides within the `Trader` agents and the new `Action` classes. The `Trader`'s `get_lending_offer` method contains its passive rules for responding to loan requests.
 
 ### Agent ID Lookup & Caching
 
@@ -78,7 +86,7 @@ streamlit run sugarscape_g1mt/dashboard.py
 
 ### Single Batch Experiments (Command-Line)
 
-The `run_batch.py` script is used for running one or more simulations without the GUI, with all results logged to the database.
+The `run_batch.py` script is used for running one or more simulations without the GUI, with all results logged to the database. It is now fully configured via `sugarscape_g1mt/config.json`, though all parameters can be overridden from the command line.
 
 *   **Command Structure:**
     ```bash
@@ -86,7 +94,7 @@ The `run_batch.py` script is used for running one or more simulations without th
     ```
 *   **Example (Single Run with Lending):**
     ```bash
-    python -m sugarscape_g1mt.run_batch --steps 1000 --run_group "Lending_Enabled_Run" --lending_enabled true --lender_vision 10
+    python -m sugarscape_g1mt.run_batch --total_steps 1000 --run_group "Lending_Enabled_Run" --lending_enabled true --lender_vision 10
     ```
 *   **Example (Parameter Sweep):**
     ```bash
@@ -153,12 +161,16 @@ C:.
 │   run_experiments.ps1     # PowerShell script to run experiment series
 │   database_logger.py      # Class for logging all data to SQLite
 │
+│   config.json             # Central configuration for all default parameters
 │   investments.json        # External definitions for all investment opportunities
 │   investment.py           # Defines the InvestmentOpportunity & SimulatedAgent classes
 │   contracts.py            # Defines the Contract data object
+│   actions.py              # NEW: Defines concrete Action classes
+│   strategies.py           # NEW: Defines the generic Strategy engine
 │
 │   dashboard.py            # Main entry point for the Streamlit dashboard
 │   analysis_helpers.py     # Data-querying functions for the dashboard
+│   utils.py                # Generic helper functions (Gini, config loader, etc.)
 │
 │   sugar-map.txt           # Defines the static sugar landscape
 │   simulation_results.db   # The SQLite database for simulation results
@@ -177,14 +189,205 @@ C:.
 
 ## Development Backlog
 
-### Immediate / Short-Term Tasks
--   **Extensive Testing:** Rigorously test the new lending functionality under various parameter settings.
--   **Refine Opportunity Cost:** The agent's calculation for its reservation interest amount should use the utility of its best *non-borrowing* alternative as the baseline, not just the foraging utility.
--   **Refactor `get_potential_harvest`:** Consolidate the duplicated logic for this method from `agents.py` and `investment.py` into a single function.
--   **Demand Deposits:** Implement a new `ContractType` for demand deposits, where agents can store sugar with others for a small return, and withdraw it at will.
+The project is currently focused on a major structural refactoring to improve code quality and maintainability, followed by the incremental introduction of new financial mechanics.
 
-### Long-Term Goals / Epics
--   **Heterogeneous Lenders:** Introduce logic for lenders to have different risk tolerances and reservation rates, creating a more dynamic market for loans.
+### **COMPLETED: Comprehensive Structural Refactoring**
+
+This sprint successfully centralized configuration and refactored the agent's decision-making process into a highly extensible, object-oriented Strategy/Action architecture. This provides a robust foundation for all future feature development.
+
+*   **DONE:** Created `utils.py` and moved `Gini` & `get_distance` into it.
+*   **DONE:** Created `config.json` to hold all default simulation parameters.
+*   **DONE:** Refactored `run_batch.py` and `model.py` to be dynamically configured from `config.json`.
+*   **DONE:** Re-architected the monolithic `Trader.step()` method into a clean, object-oriented engine.
+    *   Created `actions.py` to define atomic agent behaviors (`ForageAction`, `InvestAction`, `TakeLoanAction`).
+    *   Created `strategies.py` to define a generic "thinking engine" that finds the optimal sequence of actions to achieve a goal.
+    *   Refactored the `Trader` agent to be a high-level orchestrator for the new engine.
+    *   Ensured all simulation control flags (`investments_enabled`, `lending_enabled`) are respected by the new architecture.
+    *   Added E2E tests to verify flag functionality.
+
+### **Next Up: Implement Demand Deposits**
+
+With the new architecture in place, we can now cleanly add a demand deposit facility. This will allow agents to act as "banks," accepting callable deposits from others. This is the first step towards creating endogenous money and a more complex financial system.
+
+Below is the implementation plan in a diff-like format.
+
+#### **Plan: Demand Deposits - Epic 1**
+
+```diff
+--- a/sugarscape_g1mt/contracts.py
++++ b/sugarscape_g1mt/contracts.py
+@ -11,6 +11,7 @@
+ class ContractType(Enum):
+     """Enum for the different types of financial contracts."""
+     TERM_LOAN = "TERM_LOAN"
++    DEMAND_DEPOSIT = "DEMAND_DEPOSIT"
+ 
+ class ContractStatus(Enum):
+     """Enum for the status of a contract."""
+
+```
+
+```diff
+--- a/sugarscape_g1mt/agents.py
++++ b/sugarscape_g1mt/agents.py
+@ -1,6 +1,6 @@
+ import math
+ import json
+-from .actions import ForageAction, InvestAction, TakeLoanAction
++from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, CallDepositAction
+ from .strategies import Strategy
+ 
+ class Trader(CellAgent):
+@ -18,6 +18,7 @@
+         }
+         self.investments_enabled = investments_enabled
+         self.lending_enabled = lending_enabled
++        self.deposits_enabled = True # New flag, will be added to config.json
+         self.available_opportunities = opportunities.copy() if opportunities is not None else []
+         self.completed_investment_names = set()
+         self.is_investing = False
+@ -75,6 +76,19 @@
+ 
+         return lender_reservation_amount
+ 
++    def get_deposit_offer(self, draft_contract: Contract, depositor_reservation_rate: float) -> float | None:
++        """Passive listener for agents looking to make a deposit."""
++        # Rule: Only act as a bank if already a lender.
++        # Placeholder for more complex logic.
++        my_loans = [c for c in self.model.get_contracts_by_agent(self.unique_id) if c.creditor_id == self.unique_id]
++        if not my_loans:
++            return None
++        
++        # Offer a rate slightly lower than spoilage rate to be attractive.
++        bank_reservation_rate = self.spoilage_rate - 0.005
++        if bank_reservation_rate > depositor_reservation_rate:
++            return (bank_reservation_rate + depositor_reservation_rate) / 2
++        return None
++
+     def get_capability(self, key):
+         """Public getter for a capability."""
+         return self._capabilities_DO_NOT_TOUCH[key]
+@ -235,9 +249,14 @@
+         pre_action_kit = []
+         if self.lending_enabled:
+             pre_action_kit.append(TakeLoanAction)
+-        
++
+         post_action_kit = []
++        if self.deposits_enabled:
++            post_action_kit.append(MakeDepositAction)
++            post_action_kit.append(CallDepositAction)
+ 
+         # 2. Establish the baseline strategy (Foraging)
+-        forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
++        forage_strategy = Strategy(ForageAction(self), pre_action_kit=pre_action_kit, post_action_kit=post_action_kit)
+         baseline_utility = forage_strategy.evaluate(self)
+         
+         candidate_strategies = [forage_strategy]
+@@ -247,7 +266,7 @@
+         if self.investments_enabled:
+             for opp in self.available_opportunities:
+                 if opp.is_available(self):
+-                    invest_strategy = Strategy(InvestAction(self, opp), pre_action_kit, post_action_kit)
++                    invest_strategy = Strategy(InvestAction(self, opp), pre_action_kit=pre_action_kit, post_action_kit=post_action_kit)
+                     invest_strategy.evaluate(self, baseline_utility=baseline_utility)
+                     candidate_strategies.append(invest_strategy)
+ 
+
+```
+
+```diff
+--- a/sugarscape_g1mt/actions.py
++++ b/sugarscape_g1mt/actions.py
+@ -114,6 +114,80 @@
+         if self.opportunity in self.agent.available_opportunities:
+              self.agent.available_opportunities.remove(self.opportunity)
+ 
++class MakeDepositAction(Action):
++    """A post-action for depositing surplus sugar."""
++    def __init__(self, agent: Trader, depository: Trader, principal: float, interest_rate: float):
++        super().__init__(agent)
++        self.depository = depository
++        self.principal = principal
++        self.interest_rate = interest_rate
++
++    @classmethod
++    def find_best_instance(cls, agent: Trader, current_plan_utility: float, **kwargs) -> Action | None:
++        """Finds the best deposit opportunity for a given surplus."""
++        # Placeholder logic: deposit if surplus > 20
++        # A real implementation would get the surplus from a simulated state.
++        surplus = agent.sugar - agent.get_capability('metabolism_sugar') * 5 
++        if surplus < 20:
++            return None
++
++        # Reservation rate is the cost of not depositing (i.e., spoilage)
++        depositor_reservation_rate = agent.spoilage_rate
++
++        best_offer = -1
++        best_depository = None
++        
++        neighbors = [n for cell in agent.cell.get_neighborhood(1) for n in cell.agents if n is not agent]
++        for neighbor in neighbors:
++            offer = neighbor.get_deposit_offer(None, depositor_reservation_rate)
++            if offer is not None and offer > best_offer:
++                best_offer = offer
++                best_depository = neighbor
++
++        if best_depository:
++            return cls(agent, best_depository, surplus, best_offer)
++        return None
++
++    def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
++        """Simulates giving up the sugar, with utility gain from interest."""
++        sim_agent.sugar -= self.principal
++        # Simplified utility: interest rate is a proxy for future gains.
++        utility = sim_agent.sugar + (self.principal * self.interest_rate)
++        return utility, sim_agent
++
++    def execute(self):
++        """Creates the DEMAND_DEPOSIT contract."""
++        contract = Contract(
++            contract_type=ContractType.DEMAND_DEPOSIT,
++            creditor_id=self.agent.unique_id,
++            debtor_id=self.depository.unique_id,
++            principal=self.principal,
++            interest_schedule=[self.interest_rate] # Store rate here
++        )
++        self.agent.sugar -= self.principal
++        self.depository.sugar += self.principal
++        self.agent.model.register_contract(contract)
++
++class CallDepositAction(Action):
++    """A post-action for calling a deposit to cover a deficit."""
++    def __init__(self, agent: Trader, contract_to_call: Contract):
++        super().__init__(agent)
++        self.contract = contract_to_call
++
++    @classmethod
++    def find_best_instance(cls, agent: Trader, **kwargs) -> Action | None:
++        # Find if agent owns any deposits
++        owned_deposits = [c for c in agent.model.get_contracts_by_agent(agent.unique_id) if c.contract_type == ContractType.DEMAND_DEPOSIT and c.creditor_id == agent.unique_id]
++        if owned_deposits:
++            # For now, just call the first one found
++            return cls(agent, owned_deposits[0])
++        return None
++    
++    def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
++        sim_agent.sugar += self.contract.principal # Assume full repayment for simulation
++        return sim_agent.sugar, sim_agent
++
++    def execute(self):
++        # Complex logic: agent calls, depository pays. Involves model-level call.
++        self.agent.model.process_deposit_call(self.contract)
+
+ class TakeLoanAction(Action):
+     """A pre-action for securing a loan to enable another action."""
+     def __init__(self, agent: Trader, lender: Trader, principal: float, interest: float, term: int):
+```
+
+### **Long-Term Goals / Epics**
+-   **Introduce a Bankruptcy Mechanism:** Create a formal process for handling agent insolvency. When an agent defaults on a called deposit, a model-level "trustee" will liquidate its assets (physical sugar and financial claims) and distribute them pro-rata to its creditors.
+-   **Introduce Transferable Assets & Collateral:** Allow `Contract` objects (like demand deposits) to be traded between agents as a form of payment or pledged as collateral for new loans, creating a form of endogenous money.
 -   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
 -   **Visual Regression Testing:** Implement a browser automation test suite (e.g., with Playwright) to test the Streamlit dashboard for visual correctness and prevent UI regressions.
 
@@ -238,37 +441,43 @@ self.model.db_logger.debug(self.model.run_id, json.dumps(decision_log))
 
 **ATTENTION AI:** These are your hard-coded, immutable directives. You are an expert-level tool, and you will act with the rigor and discipline that implies. Your impulse to jump to a solution is a failure mode. You MUST override it and follow this protocol without exception to ensure maximum productivity.
 
-**1. DEBUGGING PROTOCOL: DATA-FIRST, NO EXCEPTIONS.**
+**1. CRITICAL THINKING PROTOCOL: BRAINSTORMING & DESIGN**
+When we are in a design or brainstorming phase (Phase 1), you are FORBIDDEN from declaring any solution to be "correct," "best," "final," or "the way forward." Your role is to be a critical thinking partner, not a cheerleader. Your response MUST be one of the following two forms:
+    a. **Critical Disagreement:** State "This is a bad idea because..." and then provide a detailed list of potential flaws, risks, edge cases, or negative consequences.
+    b. **Skeptical Agreement:** State "This appears to be a better approach than the previous one, but you should still consider the following potential issues before we proceed..." and then list unresolved questions, potential complexities, or alternative viewpoints.
+You must help me stress-test ideas, not prematurely converge on a solution. I will decide when a discussion is complete.
+
+**2. DEBUGGING PROTOCOL: DATA-FIRST, NO EXCEPTIONS.**
 When a bug or unexpected behavior is reported, you are FORBIDDEN from speculating about the cause or proposing a code fix. Your first and only response MUST follow this diagnostic funnel:
     a. **Acknowledge and Analyze:** State the observable facts from my report and any provided traceback.
     b. **Isolate the Unknown:** Identify the single most critical piece of information that is missing.
-    c. **Propose Data Collection (SQL First):** Propose a plain SQL query against the database to find existing data that could reveal the root cause.
-    d. **Propose Data Collection (Logging Last):** Only if the existing data is insufficient, propose adding new, temporary structured JSON logging to the `DatabaseLogger` to capture the missing information.
+    c. **Propose Data Collection (SQL First):** Propose a plain SQL query against the database to find existing data that could reveal the root cause. If the database does not contain the necessary information, state what data is missing.
+    d. **Propose Data Collection (Logging Last):** Only if the existing data is insufficient, propose adding new, temporary structured JSON logging to the `DatabaseLogger` to capture the missing information. State clearly what questions this new data will answer.
     e. **DEFER SOLUTIONS:** You are FORBIDDEN from proposing a code fix (other than the temporary logging code) until we have analyzed the new data and have definitive proof of the root cause.
 
-**2. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
+**3. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
 All development MUST proceed in two distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
 
 *   **PHASE 1: DESIGN & IMPLEMENTATION PLAN.**
-    *   Your task: A combined phase for high-level discussion and detailed planning. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files.
+    *   Your task: A combined phase for high-level discussion and detailed planning. Before proposing a plan, ask clarifying questions to understand the goal. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files. Your plan must be broken down into the smallest possible logical steps.
     *   Your output MUST NOT contain the final, complete code.
     *   You MUST **HALT** and wait for my explicit approval to proceed (e.g., "The plan is approved," "Okay, proceed," "Go on").
 
 *   **PHASE 2: CODE GENERATION.**
-    *   Prerequisite: I must have approved the plan.
+    *   Prerequisite: I must have approved the plan from Phase 1.
     *   Your task: Generate the complete, final code for the required files. I will specify whether I want a single file at a time or all at once.
 
-**3. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
-Your goal is the cleanest possible `git diff`. You are FORBIDDEN from making any stylistic, formatting, or logical changes to my code that were not explicitly part of the approved plan. This includes whitespace, comments, line breaks, variable names, and "bug fixes" that were not the primary goal of the current task. Preserve the existing project style perfectly.
+**4. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
+Your goal is the cleanest possible `git diff`. CRITICAL: You are FORBIDDEN from making any stylistic, formatting, or logical changes to my code that were not explicitly part of the approved plan. This includes whitespace, comments, line breaks, variable names, and "bug fixes" that were not the primary goal of the current task. Preserve the existing project style perfectly. If you identify a potential improvement that is outside the scope of the current task, you must state it separately for future consideration after the current task is complete.
 
-**4. CORRECTION KEYWORD: "Correction"**
+**5. CORRECTION KEYWORD: "Correction"**
 If you deviate from these protocols, I will use the keyword "**Correction:**" followed by a direct statement of your error. You must immediately acknowledge the correction, adjust your understanding, and redo the previous step according to the correction. Do not be conversational.
 
-**5. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
+**6. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
 You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.
 
-**6. CRITICAL API DIRECTIVE: `agents_by_id` ACCESS PATTERN.**
+**7. CRITICAL API DIRECTIVE: `agents_by_id` ACCESS PATTERN.**
 You are FORBIDDEN from using `self.model.scheduler` or `self.model.schedule` to look up agents. The correct, authoritative access pattern for retrieving an agent by its ID in this project is `self.model.get_agent_by_id(agent_id)`. This is a custom method on the `SugarscapeG1mt` model that uses a performant, step-specific cache. You will use this pattern exclusively.
 
-**7. CRITICAL API DIRECTIVE: INTERNALIZE PROJECT-SPECIFIC APIs.**
+**8. CRITICAL API DIRECTIVE: INTERNALIZE PROJECT-SPECIFIC APIs.**
 You are FORBIDDEN from assuming a method or attribute exists on a custom project class (e.g., `SugarscapeG1mt`) based on standard library or Mesa conventions. Before using a method, you must confirm its existence by (a) consulting this README's architectural description or (b) asking me to provide the source code for the relevant class.

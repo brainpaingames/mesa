@@ -12,18 +12,8 @@ from .investment import InvestmentOpportunity
 from collections import defaultdict
 from .contracts import Contract, ContractStatus
 from dataclasses import asdict
+from .utils import Gini, load_config
 
-def Gini(model):
-    """Helper to calculate the Gini coefficient for agent wealth."""
-    agent_wealths = [agent.sugar for agent in model.agents_by_type[Trader]]
-    if len(agent_wealths) < 2:
-        return 0
-    # Formula from https://en.wikipedia.org/wiki/Gini_coefficient
-    x = np.sort(agent_wealths)
-    n = len(x)
-    cumx = np.cumsum(x, dtype=float)
-    # The Gini coefficient is the area between the Lorenz curve and the line of equality
-    return (n + 1 - 2 * np.sum(cumx) / cumx[-1]) / n
 
 class SugarscapeG1mt(mesa.Model):
     """
@@ -39,49 +29,31 @@ class SugarscapeG1mt(mesa.Model):
         except (FileNotFoundError, subprocess.CalledProcessError):
             return "not a git repo", False
 
-    def __init__(
-        self,
-        width=50,
-        height=50,
-        initial_population=200,
-        agent_re_spawn=True,
-        sugar_regrowth_rate=1.0,
-        investments_enabled=True,
-        lending_enabled=True,
-        investment_portfolio_name="default",
-        investment_json_path="sugarscape_g1mt/investments.json",
-        endowment_min=25,
-        endowment_max=50,
-        metabolism_min=1,
-        metabolism_max=5,
-        vision_min=1,
-        vision_max=5,
-        agent_age_min=60,
-        agent_age_max=100,
-        agent_look_ahead_horizon=15,
-        lender_vision=7,
-        lender_look_ahead_horizon=20,
-        run_group="default",
-        description="A simulation run.",
-        log_agent_data=False,
-        dev_mode=False,
-        seed=None,
-        db_logger=None,
-        run_id=None,
-        tag="dev"
-    ):
+    def __init__(self, **kwargs):
+        # --- 1. Load config, merge with kwargs to get final parameters ---
+        config = load_config()
+        defaults = {}
+        for section in config.values():
+            defaults.update(section)
+        # Passed-in kwargs override the defaults from the config file
+        params = {**defaults, **kwargs}
+
+        # --- 2. Initialize Mesa Model with seed ---
+        seed = params.get('seed')
         super().__init__(seed=seed)
 
-        # --- CACHE INITIALIZATION ---
+        # --- 3. Set special attributes and cache ---
         self._agents_by_id_cache = None
+        self.dev_mode = params.get('dev_mode', False)
+        self.db_logger = params.get('db_logger')
+        self.run_id = params.get('run_id')
 
-        self.dev_mode = dev_mode
-        self.db_logger = db_logger
-        self.run_id = run_id
-        self.investment_portfolio_name = investment_portfolio_name
-        self.investment_json_path = investment_json_path
 
-        # This block is now only executed when running without a batch script
+        # --- 5. Set all parameters as model attributes ---
+        for key, value in params.items():
+            setattr(self, key, value)
+        
+        # --- 6. Set up DB Logger if not provided (i.e., when not running from a batch) ---
         if not self.dev_mode and self.db_logger is None:
             git_hash, is_dirty = self._get_git_info()
             if is_dirty:
@@ -93,56 +65,21 @@ class SugarscapeG1mt(mesa.Model):
             run_meta = {
                 "timestamp": datetime.datetime.now().isoformat(),
                 "git_hash": git_hash,
-                "run_group": run_group,
-                "description": description,
-                "tag": tag
+                "run_group": self.run_group,
+                "description": self.description,
+                "tag": self.tag
             }
 
-            model_params = {
-                "width": width, "height": height,
-                "initial_population": initial_population,
-                "agent_re_spawn": int(agent_re_spawn),
-                "sugar_regrowth_rate": sugar_regrowth_rate,
-                "investments_enabled": int(investments_enabled),
-                "lending_enabled": int(lending_enabled),
-                "investment_portfolio_name": investment_portfolio_name,
-                "investment_json_path": investment_json_path,
-                "endowment_min": endowment_min, "endowment_max": endowment_max,
-                "metabolism_min": metabolism_min, "metabolism_max": metabolism_max,
-                "vision_min": vision_min, "vision_max": vision_max,
-                "agent_age_min": agent_age_min, "agent_age_max": agent_age_max,
-                "agent_look_ahead_horizon": agent_look_ahead_horizon,
-                "lender_vision": lender_vision,
-                "lender_look_ahead_horizon": lender_look_ahead_horizon,
-                "log_agent_data": int(log_agent_data),
-            }
-
+            # Log all parameters except the DB objects themselves
+            db_params_to_log = {k: v for k, v in params.items() if k not in ['db_logger', 'run_id']}
+            
             self.db_logger = DatabaseLogger()
-            self.run_id = self.db_logger.create_new_run(run_meta, model_params)
+            self.run_id = self.db_logger.create_new_run(run_meta, db_params_to_log)
 
-        self.width = width
-        self.height = height
-        self.initial_population = initial_population
-        self.agent_re_spawn = agent_re_spawn
-        self.sugar_regrowth_rate = sugar_regrowth_rate
-        self.investments_enabled = investments_enabled
-        self.lending_enabled = lending_enabled
-        self.endowment_min = endowment_min
-        self.endowment_max = endowment_max
-        self.metabolism_min = metabolism_min
-        self.metabolism_max = metabolism_max
-        self.vision_min = vision_min
-        self.vision_max = vision_max
-        self.agent_age_min = agent_age_min
-        self.agent_age_max = agent_age_max
-        self.agent_expected_lifespan = (agent_age_min + agent_age_max) / 2
-        self.agent_look_ahead_horizon = agent_look_ahead_horizon
-        self.log_agent_data = log_agent_data
-        self.lender_vision = lender_vision
-        self.lender_look_ahead_horizon = lender_look_ahead_horizon
-
+        # --- 7. Initialize model components ---
+        self.agent_expected_lifespan = (self.agent_age_min + self.agent_age_max) / 2
         self.running = True
-
+        
         self.grid = OrthogonalVonNeumannGrid(
             (self.width, self.height), torus=False, random=self.random
         )
@@ -201,7 +138,8 @@ class SugarscapeG1mt(mesa.Model):
             investments_enabled=self.investments_enabled,
             lending_enabled=self.lending_enabled,
             lender_vision=self.lender_vision,
-            lender_look_ahead_horizon=self.lender_look_ahead_horizon
+            lender_look_ahead_horizon=self.lender_look_ahead_horizon,
+            spoilage_rate=self.agent_spoilage_rate
         )
     
     # --- LAZY-LOADED CACHE GETTER ---
@@ -311,7 +249,8 @@ class SugarscapeG1mt(mesa.Model):
             investments_enabled=self.investments_enabled,
             lending_enabled=self.lending_enabled,
             lender_vision=self.lender_vision,
-            lender_look_ahead_horizon=self.lender_look_ahead_horizon
+            lender_look_ahead_horizon=self.lender_look_ahead_horizon,
+            spoilage_rate=self.agent_spoilage_rate
         )
 
     def step(self):

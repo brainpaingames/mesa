@@ -37,7 +37,7 @@ $run1_start = Get-Date
 
 # Run the command directly to get real-time output
 python -m sugarscape_g1mt.run_batch --run_group "baseline" `
-    --steps 500 `
+    --total_steps 500 `
     --replications 1 `
     --initial_population "[100,200,300,400]" `
     --agent_re_spawn true `
@@ -60,7 +60,7 @@ Write-Host "`n[2/3] Running: Investments-Enabled Experiment..." -ForegroundColor
 $run2_start = Get-Date
 
 python -m sugarscape_g1mt.run_batch --run_group "baseline_investments" `
-    --steps 500 `
+    --total_steps 500 `
     --replications 1 `
     --initial_population "[100,200,300,400]" `
     --agent_re_spawn true `
@@ -83,7 +83,7 @@ Write-Host "`n[3/3] Running: Lending-Enabled Experiment..." -ForegroundColor Cya
 $run3_start = Get-Date
 
 python -m sugarscape_g1mt.run_batch --run_group "baseline_lending" `
-    --steps 500 `
+    --total_steps 500 `
     --replications 1 `
     --initial_population "[100,200,300,400]" `
     --agent_re_spawn true `

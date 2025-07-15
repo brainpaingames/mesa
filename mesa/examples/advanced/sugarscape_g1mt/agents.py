@@ -5,17 +5,9 @@ from mesa.discrete_space import CellAgent
 from .contracts import Contract, ContractType, ContractStatus
 from .investment import SimulatedAgent
 from .database_logger import DatabaseLogger
-
-def get_distance(cell_1, cell_2):
-    """
-    Calculate the Euclidean distance between two positions.
-    Used in Trader.move()
-    """
-    x1, y1 = cell_1.coordinate
-    x2, y2 = cell_2.coordinate
-    dx = x1 - x2
-    dy = y1 - y2
-    return math.sqrt(dx**2 + dy**2)
+from .utils import get_distance
+from .actions import ForageAction, InvestAction, TakeLoanAction
+from .strategies import Strategy
 
 
 class Trader(CellAgent):
@@ -26,11 +18,12 @@ class Trader(CellAgent):
     - Can invest sugar to permanently reduce metabolism.
     """
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, lender_vision=7, lender_look_ahead_horizon=20):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, lender_vision=7, lender_look_ahead_horizon=20, spoilage_rate=0.0):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
         self.sugar = float(sugar)
+        self.spoilage_rate = float(spoilage_rate)
         self.max_age = int(max_age)
         self.expected_lifespan = float(expected_lifespan)
         self.age = 0
@@ -103,6 +96,8 @@ class Trader(CellAgent):
         my_metabolism = self.get_capability("metabolism_sugar")
         for _ in range(self.lender_look_ahead_horizon):
             sim_sugar += worst_case_harvest
+            # Lender must account for its own sugar spoiling
+            sim_sugar *= (1 - self.spoilage_rate)
             sim_sugar -= my_metabolism
         surplus_sugar = max(0, sim_sugar)
 
@@ -133,6 +128,7 @@ class Trader(CellAgent):
 
 
         self._capabilities_DO_NOT_TOUCH[key] = value
+
     def get_reportable_attributes(self):
         """Returns a dictionary of agent attributes for database logging."""
         pos_x, pos_y = (self.cell.coordinate[0], self.cell.coordinate[1]) if self.cell is not None else (None, None)
@@ -140,6 +136,7 @@ class Trader(CellAgent):
             "pos_x": pos_x,
             "pos_y": pos_y,
             "sugar": float(self.sugar),
+            "spoilage_rate": float(self.spoilage_rate),
             "metabolism": float(self.get_capability("metabolism_sugar")),
             "vision": int(self.get_capability("vision")),
             "age": float(self.age),
@@ -204,175 +201,97 @@ class Trader(CellAgent):
         ]
 
         return self.random.choice(final_candidates)
-
-    def get_max_potential_harvest(self):
-        """Helper to perceive the best foraging spot in the current vision for forecasting."""
-        best_cell = self.find_best_foraging_cell()
-        return self.get_potential_harvest(best_cell) if best_cell else 0
-
-    def simulate_forage_scenario(self, horizon):
-        """Simulates future sugar if agent only forages."""
-        sim_sugar = self.sugar
-        expected_harvest = self.get_max_potential_harvest()
-        metabolism = self.get_capability("metabolism_sugar")
-        
-        agent_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set())
-        agent_contracts = [self.model.contracts_by_id[cid] for cid in agent_contract_ids if self.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
-
-        for i in range(horizon):
-            current_sim_step = self.model.steps + 1 + i
-            for contract in agent_contracts:
-                if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
-                    if contract.creditor_id == self.unique_id:
-                        sim_sugar += contract.total_repayment_amount
-                    elif contract.debtor_id == self.unique_id:
-                        sim_sugar -= contract.total_repayment_amount
-
-            sim_sugar += expected_harvest
-            sim_sugar -= metabolism
-            if sim_sugar <= 0:
-                return -1, True
-        return sim_sugar, False
-
-    def _calculate_utility_with_hypothetical_loan(self, investment_opp, loan: Contract | None):
-        """Helper to simulate utility given a specific loan agreement (or None)."""
-        horizon = self.get_capability('agent_look_ahead_horizon')
-        
-        sim_agent = SimulatedAgent(self)
-        if loan:
-            sim_agent.sugar += loan.principal
-        
-        return investment_opp.calculate_utility(sim_agent, horizon, hypothetical_loan=loan)
-
-    def step(self):
-        """Main step logic for the agent."""
-        self.process_contract_maturities()
-
-        if self.is_investing:
-            self.investment_counter -= 1
-            if self.investment_counter <= 0:
-                self.current_investment.apply_reward_to(self)
-                self.completed_investment_names.add(self.current_investment.name)
-                self.is_investing = False
-                self.current_investment = None
-        else:
-            horizon = self.get_capability('agent_look_ahead_horizon')
-            forage_utility, forage_death = self.simulate_forage_scenario(horizon)
-            if forage_death: forage_utility = -1
-            
-            candidate_actions = [(forage_utility, ("FORAGE", None))]
-
-            if self.investments_enabled:
-                for opp in self.available_opportunities:
-                    if not opp.is_available(self):
-                        continue
-                    
-                    utility, is_death = opp.calculate_utility(self, horizon)
-
-                    if not is_death:
-                        candidate_actions.append((utility, ("INVEST", opp)))
-                    elif self.lending_enabled:
-                        survival_cost = opp.cost["metabolism_during_investment"] * (opp.cost["duration"] + 1)
-                        shortfall = max(0, survival_cost - self.sugar)
-                        amount_needed = shortfall
-                        
-                        if amount_needed <= 0:
-                            continue
-                        
-                        term = opp.cost["duration"] + 10
-                        draft_contract = Contract(
-                            contract_type=ContractType.TERM_LOAN, creditor_id=-1,
-                            debtor_id=self.unique_id, principal=amount_needed,
-                            term_steps=term, issue_step=self.model.steps,
-                            interest_schedule=[0]
-                        )
-                        
-                        utility_zero_interest, death_zero_interest = self._calculate_utility_with_hypothetical_loan(opp, draft_contract)
-
-                        if death_zero_interest:
-                            continue
-
-                        reservation_amount = max(0, utility_zero_interest - forage_utility)
-                        
-                        if reservation_amount <= 0:
-                            continue
-                        
-                        neighbors = [
-                            agent
-                            for cell in self.cell.get_neighborhood(self.lender_vision, include_center=False)
-                            for agent in cell.agents
-                            if isinstance(agent, Trader)
-                        ]
-                        self.random.shuffle(neighbors)
-
-                        for lender in neighbors:
-                            lender_offer = lender.get_lending_offer(draft_contract, reservation_amount)
-                            
-                            if lender_offer is not None:
-                                final_interest = (reservation_amount + lender_offer) / 2
-                                hypothetical_loan = Contract(
-                                    contract_type=ContractType.TERM_LOAN, creditor_id=lender.unique_id,
-                                    debtor_id=self.unique_id, principal=amount_needed,
-                                    term_steps=term, issue_step=self.model.steps, interest_schedule=[final_interest]
-                                )
-                                final_utility, final_death = self._calculate_utility_with_hypothetical_loan(opp, hypothetical_loan)
-                                
-                                if not final_death:
-                                    candidate_actions.append((final_utility, ("INVEST_WITH_LOAN", opp, lender, amount_needed, final_interest)))
-            
-            candidate_actions.sort(key=lambda x: x[0], reverse=True)
-            best_utility, best_action_data = candidate_actions[0]
-
-            action_type = best_action_data[0]
-            
-            if action_type == "INVEST":
-                _, investment_opp = best_action_data
-                self.is_investing = True
-                self.current_investment = investment_opp
-                self.investment_counter = investment_opp.cost["duration"]
-                self.set_capability("metabolism_sugar", investment_opp.cost["metabolism_during_investment"])
-                self.available_opportunities.remove(investment_opp)
-
-            elif action_type == "INVEST_WITH_LOAN":
-                _, investment_opp, lender, amount_needed, final_interest = best_action_data
-                
-                term = investment_opp.cost["duration"] + 10
-                final_contract = Contract(
-                    contract_type=ContractType.TERM_LOAN, creditor_id=lender.unique_id,
-                    debtor_id=self.unique_id, principal=amount_needed,
-                    term_steps=term, issue_step=self.model.steps,
-                    interest_schedule=[final_interest]
-                )
-                lender.sugar -= amount_needed
-                self.sugar += amount_needed
-                self.model.register_contract(final_contract)
-                
-                self.is_investing = True
-                self.current_investment = investment_opp
-                self.investment_counter = investment_opp.cost["duration"]
-                self.set_capability("metabolism_sugar", investment_opp.cost["metabolism_during_investment"])
-                self.available_opportunities.remove(investment_opp)
-
-            else: # FORAGE
-                self.move()
-                self.eat()
-
-        self.age += 1
-        self.metabolize()
-        self.maybe_die()
-
-    def move(self):
-        """Moves the agent to the best foraging cell in its vision."""
-        best_cell = self.find_best_foraging_cell()
-        if best_cell:
-            self.cell = best_cell
-
+    
     def eat(self):
         """
         Agent harvests sugar from its current cell.
         """
         self.sugar += self.get_potential_harvest(self.cell)
         self.cell.sugar = 0
+
+    def apply_spoilage(self):
+        """Applies percentage-based spoilage to the agent's sugar."""
+        if self.spoilage_rate > 0:
+            self.sugar *= (1 - self.spoilage_rate)
+
+    def _update_lifecycle_and_metabolize(self):
+        """
+        Handles the final, non-discretionary part of the agent's step,
+        including aging, spoilage, metabolism, and checking for death.
+        """
+        self.age += 1
+        self.apply_spoilage()
+        self.metabolize()
+        self.maybe_die()
+
+    def _process_active_investment(self):
+        """
+        Handles the logic for a step where the agent is busy investing.
+        This involves decrementing the counter and applying the reward on completion.
+        """
+        self.investment_counter -= 1
+        if self.investment_counter <= 0:
+            self.current_investment.apply_reward_to(self)
+            self.completed_investment_names.add(self.current_investment.name)
+            self.is_investing = False
+            self.current_investment = None
+
+    def _find_best_plan(self):
+        """
+        The agent's new "brain". It creates a "tournament" of possible strategies,
+        evaluates them, and returns the action plan of the winner.
+        """
+        # 1. Assemble the "tool-kit" of available action types based on flags
+        pre_action_kit = []
+        if self.lending_enabled:
+            pre_action_kit.append(TakeLoanAction)
+        
+        post_action_kit = [] # Ready for future actions like deposits
+
+        # 2. Establish the baseline strategy (Foraging)
+        forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
+        baseline_utility = forage_strategy.evaluate(self)
+        
+        candidate_strategies = [forage_strategy]
+
+        # 3. Generate and evaluate investment strategies if enabled
+        if self.investments_enabled:
+            for opp in self.available_opportunities:
+                if opp.is_available(self):
+                    # Pass the assembled tool-kit to each investment strategy
+                    invest_strategy = Strategy(InvestAction(self, opp), pre_action_kit, post_action_kit)
+                    invest_strategy.evaluate(self, baseline_utility=baseline_utility)
+                    candidate_strategies.append(invest_strategy)
+
+        if not candidate_strategies:
+            return []
+        
+        # 4. Find the winning strategy from the fully evaluated candidates
+        best_strategy = max(candidate_strategies, key=lambda s: s.utility)
+
+        # Return the winning plan (a list of Action objects)
+        return best_strategy.get_action_plan()
+
+    def step(self):
+        """
+        The main entry point for the agent's turn. It follows a strict
+        sequence of operations: settle contracts, decide and act, and finally
+        update biological state.
+        """
+        self.process_contract_maturities()
+
+        if self.is_investing:
+            self._process_active_investment()
+        else:
+            # The new, cleaner decision-making process
+            best_plan = self._find_best_plan()
+            
+            # Execute the sequence of actions in the winning plan
+            if best_plan:
+                for action in best_plan:
+                    action.execute()
+            
+        self._update_lifecycle_and_metabolize()
 
     def metabolize(self):
         """Agent consumes sugar for metabolism."""
