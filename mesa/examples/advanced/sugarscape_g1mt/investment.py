@@ -1,6 +1,6 @@
 import math
 import copy
-from .contracts import ContractType, ContractStatus
+from .contracts import Contract, ContractType, ContractStatus
 
 class InvestmentOpportunity:
     """
@@ -21,20 +21,28 @@ class InvestmentOpportunity:
         required_prerequisites = set(self.requirements.get("prerequisites", []))
         return required_prerequisites.issubset(agent.completed_investment_names)
 
-    def calculate_utility(self, agent, horizon, hypothetical_loan=None):
+    def calculate_utility(self, agent, horizon, hypothetical_loan=None, starting_sim_agent=None):
         """
         Calculates the forecasted utility (final sugar) of undertaking this investment.
         Returns a tuple of (utility, is_death).
         """
-        if isinstance(agent, SimulatedAgent):
+        # Determine the starting state for the simulation
+        if starting_sim_agent:
+            sim_agent = starting_sim_agent
+        elif isinstance(agent, SimulatedAgent):
             sim_agent = agent
         else:
             sim_agent = SimulatedAgent(agent)
         
+        # If a hypothetical loan is passed for a "what-if" scenario, add its principal
+        if hypothetical_loan:
+            sim_agent.sugar += hypothetical_loan.principal
+
         # Get the agent's current contracts for the simulation
         agent_contract_ids = sim_agent.real_agent.model.contracts_by_agent.get(sim_agent.real_agent.unique_id, set())
         agent_contracts = [sim_agent.real_agent.model.contracts_by_id[cid] for cid in agent_contract_ids if sim_agent.real_agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
 
+        # Also include the hypothetical loan in the contract list for cash flow projection
         if hypothetical_loan:
             agent_contracts.append(hypothetical_loan)
 
