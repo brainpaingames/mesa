@@ -245,14 +245,20 @@ class Trader(CellAgent):
             self.sugar *= (1 - self.spoilage_rate)
 
     def _update_lifecycle_and_metabolize(self):
-        """Handles end-of-step biological processes."""
+        """
+        Handles the final, non-discretionary part of the agent's step,
+        including aging, spoilage, metabolism, and checking for death.
+        """
         self.age += 1
         self.apply_spoilage()
         self.metabolize()
         self.maybe_die()
 
     def _process_active_investment(self):
-        """Handles the logic for a step where the agent is busy investing."""
+        """
+        Handles the logic for a step where the agent is busy investing.
+        This involves decrementing the counter and applying the reward on completion.
+        """
         self.investment_counter -= 1
         if self.investment_counter <= 0:
             self.current_investment.apply_reward_to(self)
@@ -261,7 +267,12 @@ class Trader(CellAgent):
             self.current_investment = None
 
     def _evaluate_forage_action(self):
-        """Calculates the utility of the 'FORAGE' action."""
+        """
+        Calculates the utility of the 'FORAGE' action.
+        
+        Returns:
+            A tuple containing (utility, action_data).
+        """
         horizon = self.get_capability('agent_look_ahead_horizon')
         forage_utility, forage_death = self.simulate_forage_scenario(horizon)
         if forage_death:
@@ -270,8 +281,15 @@ class Trader(CellAgent):
 
     def _evaluate_investment_actions(self, forage_utility):
         """
-        Evaluates all available investment opportunities (both self-funded and loan-funded).
-        Yields a tuple (utility, action_data) for each viable option.
+        Evaluates all available investment opportunities, including self-funded
+        and loan-funded scenarios. This method acts as a generator.
+
+        Args:
+            forage_utility: The pre-calculated utility of foraging, used for
+                            calculating the reservation price for loans.
+
+        Yields:
+            A tuple of (utility, action_data) for each viable investment option.
         """
         horizon = self.get_capability('agent_look_ahead_horizon')
         for opp in self.available_opportunities:
@@ -335,7 +353,13 @@ class Trader(CellAgent):
                             break
 
     def _evaluate_and_choose_action(self):
-        """The agent's 'brain'. It evaluates all options and returns the best one."""
+        """
+        The agent's 'brain'. It orchestrates the evaluation of all possible
+        actions and selects the one with the highest utility.
+
+        Returns:
+            The action_data tuple for the best-rated action.
+        """
         # The forage action serves as the baseline for comparison.
         forage_utility, forage_action_data = self._evaluate_forage_action()
         candidate_actions = [(forage_utility, forage_action_data)]
@@ -350,7 +374,13 @@ class Trader(CellAgent):
         return candidate_actions[0][1]
 
     def _execute_action(self, best_action_data):
-        """The agent's 'hands'. It takes a chosen action and mutates state."""
+        """
+        The agent's 'hands'. It takes a chosen action data tuple and mutates
+        the agent's state accordingly. This method should contain no 'thinking'.
+        
+        Args:
+            best_action_data: The tuple describing the action to be executed.
+        """
         action_type = best_action_data[0]
         
         if action_type == "INVEST":
@@ -386,7 +416,11 @@ class Trader(CellAgent):
             self.eat()
 
     def step(self):
-        """Main step logic for the agent."""
+        """
+        The main entry point for the agent's turn. It follows a strict
+        sequence of operations: settle contracts, decide and act, and finally
+        update biological state.
+        """
         self.process_contract_maturities()
 
         if self.is_investing:
