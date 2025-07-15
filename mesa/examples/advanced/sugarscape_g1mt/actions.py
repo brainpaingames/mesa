@@ -2,7 +2,7 @@
 from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Type
 
 from .contracts import Contract, ContractType
 from .investment import SimulatedAgent
@@ -10,7 +10,6 @@ from .investment import SimulatedAgent
 if TYPE_CHECKING:
     from .agents import Trader
     from .investment import InvestmentOpportunity
-    from .strategies import Strategy
 
 class Action(ABC):
     """
@@ -46,6 +45,19 @@ class Action(ABC):
         """
         raise NotImplementedError
 
+    def get_enabler_action_types(self) -> List[Type[Action]]:
+        """Returns a list of Action types that could potentially enable this action if it fails."""
+        return []
+
+    @classmethod
+    def find_best_instance(cls, agent: Trader, core_action_to_enable: Action, baseline_utility: float) -> Action | None:
+        """
+        A class method responsible for discovering the parameters for this action
+        in the context of enabling a failed core action.
+        Returns an instance of itself or None.
+        """
+        return None
+
 
 class ForageAction(Action):
     """An action for moving to the best cell and harvesting sugar."""
@@ -79,6 +91,10 @@ class InvestAction(Action):
     def __init__(self, agent: Trader, opportunity: InvestmentOpportunity):
         super().__init__(agent)
         self.opportunity = opportunity
+
+    def get_enabler_action_types(self) -> List[Type[Action]]:
+        """An investment can be enabled by taking a loan."""
+        return [TakeLoanAction]
 
     def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
         """
@@ -121,6 +137,53 @@ class TakeLoanAction(Action):
         self.principal = principal
         self.interest = interest
         self.term = term
+
+    @classmethod
+    def find_best_instance(cls, agent: Trader, core_action_to_enable: InvestAction, baseline_utility: float) -> TakeLoanAction | None:
+        """
+        Contains all logic for discovering and negotiating a loan.
+        """
+        opportunity = core_action_to_enable.opportunity
+        
+        # Calculate how much sugar is needed
+        survival_cost = opportunity.cost["metabolism_during_investment"] * (opportunity.cost["duration"] + 1)
+        shortfall = max(0, survival_cost - agent.sugar)
+        amount_needed = shortfall
+        if amount_needed <= 0:
+            return None
+        
+        term = opportunity.cost["duration"] + 10
+        
+        # 1. Simulate a zero-interest loan to find the best-case utility
+        draft_contract = Contract(ContractType.TERM_LOAN, -1, agent.unique_id, amount_needed, term, agent.model.steps, [0])
+        # Use the helper on the InvestAction instance to run the simulation
+        utility_zero_interest, death_zero_interest = core_action_to_enable.calculate_utility_with_loan(agent, draft_contract)
+        
+        if death_zero_interest:
+            return None
+
+        # 2. Calculate borrower's reservation amount based on the baseline (forage) utility
+        reservation_amount = max(0, utility_zero_interest - baseline_utility)
+        if reservation_amount <= 0:
+            return None
+
+        # 3. Poll neighbors for offers
+        neighbors = [
+            neighbor
+            for cell in agent.cell.get_neighborhood(agent.lender_vision, include_center=False)
+            for neighbor in cell.agents
+            if isinstance(neighbor, type(agent))
+        ]
+        agent.random.shuffle(neighbors)
+        
+        for lender in neighbors:
+            lender_offer = lender.get_lending_offer(draft_contract, reservation_amount)
+            if lender_offer is not None:
+                # 4. If offer is good, create an instance of this Action class
+                final_interest = (reservation_amount + lender_offer) / 2
+                return cls(agent, lender, amount_needed, final_interest, term)
+        
+        return None
 
     def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
         """Simulates receiving the loan principal."""

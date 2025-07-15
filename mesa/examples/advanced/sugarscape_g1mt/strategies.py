@@ -2,7 +2,7 @@
 from __future__ import annotations
 import math
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Type
 
 from .actions import Action, InvestAction, TakeLoanAction
 from .investment import SimulatedAgent
@@ -15,30 +15,29 @@ if TYPE_CHECKING:
 class Strategy:
     """
     Represents a complete, potential plan for an agent's turn.
-    A Strategy is initialized with a "core" action and is responsible for
-    evaluating the utility of that action, including finding and adding any
-    necessary "pre-actions" (like taking a loan) to make it possible, or
-    "post-actions" (like making a deposit) to optimize its outcome.
+    A Strategy is initialized with a "core" action and a "tool-kit" of
+    available action types. It is responsible for evaluating the utility
+    of the core action, including finding and adding any necessary "pre-actions"
+    (like taking a loan) or "post-actions" to optimize its outcome.
     """
-    def __init__(self, core_action: Action):
+    def __init__(self, core_action: Action, pre_action_kit: List[Type[Action]] = None, post_action_kit: List[Type[Action]] = None):
         self.core_action = core_action
         
-        # These will be populated during the evaluation phase
-        self.pre_actions: list[Action] = []
-        self.post_actions: list[Action] = []
+        self.pre_action_kit = pre_action_kit or []
+        self.post_action_kit = post_action_kit or []
         
+        self.final_plan: list[Action] = []
         self.utility: float = -math.inf
         self.is_evaluated: bool = False
 
     def get_action_plan(self) -> list[Action]:
         """Returns the final, ordered list of actions for execution."""
-        return self.pre_actions + [self.core_action] + self.post_actions
+        return self.final_plan
 
     def evaluate(self, agent: Trader, baseline_utility: float = 0) -> float:
         """
-        The main "thinking engine". It evaluates the utility of a complete plan
-        built around the core action. This is where the "pre- and post-bundle"
-        logic lives.
+        The main "thinking engine". It evaluates all valid combinations of pre-
+        and post-actions around the core action and selects the best one.
 
         Args:
             agent: The agent making the decision.
@@ -51,86 +50,53 @@ class Strategy:
         if self.is_evaluated:
             return self.utility
 
-        # --- Phase 1: Simulate the "naked" core action ---
-        initial_sim_agent = SimulatedAgent(agent)
-        final_utility, state_after_core = self.core_action.simulate(initial_sim_agent)
+        candidate_plans = []
 
-        # --- Phase 2: Pre-Action Analysis (The "Enablers") ---
-        # If the core action failed, can we enable it with a pre-action?
-        if final_utility == -math.inf:
-            if isinstance(self.core_action, InvestAction):
-                # Try to find a loan to enable this failed investment
-                loan_action = self._find_best_loan_for_investment(agent, self.core_action, baseline_utility)
-                if loan_action:
-                    self.pre_actions.append(loan_action)
-                    
-                    # Re-simulate with the full sequence
-                    sim_state = SimulatedAgent(agent)
-                    # Simulate pre-action
-                    _, sim_state = loan_action.simulate(sim_state)
-                    # Simulate core action with the new state
-                    final_utility, state_after_core = self.core_action.simulate(sim_state)
-
-        # If the plan is still not viable, its utility is infinitely bad.
-        if final_utility == -math.inf:
-            self.utility = -math.inf
-            self.is_evaluated = True
-            return self.utility
-
-        # --- Phase 3: Post-Action Analysis (The "Optimizers") ---
-        # (This phase is currently a placeholder, ready for deposit logic)
-        final_sim_state = state_after_core
-        # The final utility is already calculated by the chained simulation.
-        # We might add post-action utility here in the future.
+        # --- Plan A: The "Naked" Core Action ---
+        naked_plan = [self.core_action]
+        naked_utility, _ = self._simulate_plan(agent, naked_plan)
+        candidate_plans.append((naked_utility, naked_plan))
         
-        # --- Phase 4: Final Utility Calculation ---
-        self.utility = final_utility
+        # --- Pre-Action Analysis (The "Enablers" and "Optimizers") ---
+        potential_enablers = self.core_action.get_enabler_action_types()
+        available_enablers = [ptype for ptype in potential_enablers if ptype in self.pre_action_kit]
+
+        for enabler_type in available_enablers:
+            # Ask the Action class to find the best instance of itself
+            enabler_action = enabler_type.find_best_instance(
+                agent=agent,
+                core_action_to_enable=self.core_action,
+                baseline_utility=baseline_utility
+            )
+
+            if enabler_action:
+                # If an enabler was found, create and evaluate a new plan
+                new_plan = [enabler_action, self.core_action]
+                new_utility, _ = self._simulate_plan(agent, new_plan)
+                candidate_plans.append((new_utility, new_plan))
+        
+        # --- Post-Action Analysis (The "Optimizers") ---
+        # (This phase is currently a placeholder, ready for deposit logic)
+        # It would take the best plans so far and try to add post-actions.
+
+        # --- Find the best overall plan ---
+        best_utility, best_plan = max(candidate_plans, key=lambda item: item[0])
+        
+        self.utility = best_utility
+        self.final_plan = best_plan
         self.is_evaluated = True
+        
         return self.utility
 
-    def _find_best_loan_for_investment(self, agent: Trader, invest_action: InvestAction, baseline_utility: float) -> TakeLoanAction | None:
-        """
-        Finds the best available loan from neighbors to fund a specific investment.
-        This logic is ported directly from the old agents.py and removes all placeholders.
-        """
-        opportunity = invest_action.opportunity
-        
-        # Calculate how much sugar is needed
-        survival_cost = opportunity.cost["metabolism_during_investment"] * (opportunity.cost["duration"] + 1)
-        shortfall = max(0, survival_cost - agent.sugar)
-        amount_needed = shortfall
-        if amount_needed <= 0:
-            return None
-        
-        term = opportunity.cost["duration"] + 10
-        
-        # 1. Simulate a zero-interest loan to find the best-case utility
-        draft_contract = Contract(ContractType.TERM_LOAN, -1, agent.unique_id, amount_needed, term, agent.model.steps, [0])
-        utility_zero_interest, death_zero_interest = invest_action.calculate_utility_with_loan(agent, draft_contract)
-        
-        if death_zero_interest:
-            return None
+    def _simulate_plan(self, agent: Trader, plan: List[Action]) -> tuple[float, SimulatedAgent]:
+        """Helper to simulate a complete sequence of actions."""
+        sim_agent = SimulatedAgent(agent)
+        final_utility = -math.inf
 
-        # 2. Calculate borrower's reservation amount based on the baseline (forage) utility
-        reservation_amount = max(0, utility_zero_interest - baseline_utility)
-        if reservation_amount <= 0:
-            return None
-
-        # 3. Poll neighbors for offers
-        neighbors = [
-            neighbor
-            for cell in agent.cell.get_neighborhood(agent.lender_vision, include_center=False)
-            for neighbor in cell.agents
-            if isinstance(neighbor, type(agent))
-        ]
-        agent.random.shuffle(neighbors)
+        for action in plan:
+            final_utility, sim_agent = action.simulate(sim_agent)
+            if final_utility == -math.inf:
+                # If any step in the plan fails, the whole plan fails.
+                return -math.inf, sim_agent
         
-        for lender in neighbors:
-            # Reusing the existing passive listener on the lender agent
-            lender_offer = lender.get_lending_offer(draft_contract, reservation_amount)
-            if lender_offer is not None:
-                # 4. If offer is good, finalize the deal
-                final_interest = (reservation_amount + lender_offer) / 2
-                return TakeLoanAction(agent, lender, amount_needed, final_interest, term)
-        
-        return None
+        return final_utility, sim_agent

@@ -148,3 +148,69 @@ def test_lending_investment_and_helpers():
     # Assert that expected numeric columns are still present
     assert '#Traders' in df_from_helper.columns, "Expected numeric column '#Traders' is missing."
     assert 'Gini' in df_from_helper.columns, "Expected numeric column 'Gini' is missing."
+
+
+@pytest.mark.e2e
+def test_flags_disable_features():
+    """
+    Tests that setting 'lending_enabled' and 'investments_enabled' to false
+    correctly disables those features in the simulation.
+    """
+    # --- Scenario 1: Test with Lending Disabled ---
+    timestamp1 = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    run_group_lending_off = f"E2E_Test_Lending_Disabled_{timestamp1}"
+
+    params_lending_off = {
+        "total_steps": "50", "run_group": run_group_lending_off, "seed": "123",
+        "initial_population": "50", "endowment": "[5, 5]", "age": "[1000, 1000]",
+        "investments_enabled": "true", # Investments ON
+        "lending_enabled": "false",    # Lending OFF
+        "db": str(DB_PATH)
+    }
+    
+    command = [sys.executable, "-m", "sugarscape_g1mt.run_batch"]
+    for key, value in params_lending_off.items():
+        command.append(f"--{key}"); command.append(str(value))
+    
+    working_dir = PROJECT_ROOT.parent
+    subprocess.run(command, check=True, cwd=working_dir)
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT run_id FROM runs WHERE run_group = ?", (run_group_lending_off,))
+    run_id1 = cursor.fetchone()[0]
+
+    # Assert that NO loans were created
+    cursor.execute("SELECT SUM(reporter_value) FROM model_results WHERE run_id = ? AND reporter_name = 'Active Loan Count'", (run_id1,))
+    total_loans = cursor.fetchone()[0]
+    # The sum could be None if no rows are returned, or 0. Both are valid.
+    assert total_loans is None or total_loans == 0, "Loans were created even when lending was disabled."
+
+    # --- Scenario 2: Test with Investments Disabled ---
+    timestamp2 = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    run_group_invest_off = f"E2E_Test_Investments_Disabled_{timestamp2}"
+
+    params_invest_off = {
+        "total_steps": "50", "run_group": run_group_invest_off, "seed": "123",
+        "initial_population": "50", "endowment": "[5, 5]", "age": "[1000, 1000]",
+        "log_agent_data": "true",
+        "investments_enabled": "false", # Investments OFF
+        "lending_enabled": "true",     # Lending ON (but should have no effect)
+        "db": str(DB_PATH)
+    }
+
+    command = [sys.executable, "-m", "sugarscape_g1mt.run_batch"]
+    for key, value in params_invest_off.items():
+        command.append(f"--{key}"); command.append(str(value))
+    
+    subprocess.run(command, check=True, cwd=working_dir)
+
+    cursor.execute("SELECT run_id FROM runs WHERE run_group = ?", (run_group_invest_off,))
+    run_id2 = cursor.fetchone()[0]
+
+    # Assert that NO agent ever entered the 'is_investing' state
+    cursor.execute("SELECT SUM(attribute_value) FROM agent_data WHERE run_id = ? AND attribute_name = 'is_investing'", (run_id2,))
+    total_investing_time = cursor.fetchone()[0]
+    assert total_investing_time is None or total_investing_time == 0, "Agents were investing even when investments were disabled."
+
+    conn.close()

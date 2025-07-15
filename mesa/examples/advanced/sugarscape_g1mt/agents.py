@@ -6,7 +6,7 @@ from .contracts import Contract, ContractType, ContractStatus
 from .investment import SimulatedAgent
 from .database_logger import DatabaseLogger
 from .utils import get_distance
-from .actions import ForageAction, InvestAction
+from .actions import ForageAction, InvestAction, TakeLoanAction
 from .strategies import Strategy
 
 
@@ -241,26 +241,32 @@ class Trader(CellAgent):
         The agent's new "brain". It creates a "tournament" of possible strategies,
         evaluates them, and returns the action plan of the winner.
         """
-        # Phase 1: Establish the baseline utility by evaluating the Forage strategy
-        forage_strategy = Strategy(ForageAction(self))
+        # 1. Assemble the "tool-kit" of available action types based on flags
+        pre_action_kit = []
+        if self.lending_enabled:
+            pre_action_kit.append(TakeLoanAction)
+        
+        post_action_kit = [] # Ready for future actions like deposits
+
+        # 2. Establish the baseline strategy (Foraging)
+        forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
         baseline_utility = forage_strategy.evaluate(self)
         
         candidate_strategies = [forage_strategy]
 
-        # Phase 2: Create and evaluate investment strategies using the baseline for context
+        # 3. Generate and evaluate investment strategies if enabled
         if self.investments_enabled:
             for opp in self.available_opportunities:
                 if opp.is_available(self):
-                    invest_strategy = Strategy(InvestAction(self, opp))
-                    # Pass baseline_utility to the evaluation of other strategies
+                    # Pass the assembled tool-kit to each investment strategy
+                    invest_strategy = Strategy(InvestAction(self, opp), pre_action_kit, post_action_kit)
                     invest_strategy.evaluate(self, baseline_utility=baseline_utility)
                     candidate_strategies.append(invest_strategy)
 
         if not candidate_strategies:
             return []
         
-        # Phase 3: Find the winning strategy from the evaluated candidates
-        # The key can just be s.utility now since they have all been evaluated.
+        # 4. Find the winning strategy from the fully evaluated candidates
         best_strategy = max(candidate_strategies, key=lambda s: s.utility)
 
         # Return the winning plan (a list of Action objects)
@@ -281,8 +287,9 @@ class Trader(CellAgent):
             best_plan = self._find_best_plan()
             
             # Execute the sequence of actions in the winning plan
-            for action in best_plan:
-                action.execute()
+            if best_plan:
+                for action in best_plan:
+                    action.execute()
             
         self._update_lifecycle_and_metabolize()
 
