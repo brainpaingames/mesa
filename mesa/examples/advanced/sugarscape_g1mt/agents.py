@@ -1,3 +1,5 @@
+# sugarscape_g1mt/agents.py
+
 import math
 import json 
 import inspect
@@ -6,7 +8,7 @@ from .contracts import Contract, ContractType, ContractStatus
 from .investment import SimulatedAgent
 from .database_logger import DatabaseLogger
 from .utils import get_distance
-from .actions import ForageAction, InvestAction, TakeLoanAction
+from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, CallDepositAction
 from .strategies import Strategy
 
 
@@ -16,9 +18,10 @@ class Trader(CellAgent):
     - Has a metabolism of sugar.
     - Harvests sugar to survive.
     - Can invest sugar to permanently reduce metabolism.
+    - Can lend, borrow, and accept deposits.
     """
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, lender_vision=7, lender_look_ahead_horizon=20, spoilage_rate=0.0):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, deposits_enabled=True, deposit_buffer_horizon=5, lender_vision=7, lender_look_ahead_horizon=20, spoilage_rate=0.0):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
@@ -36,6 +39,8 @@ class Trader(CellAgent):
         }
         self.investments_enabled = investments_enabled
         self.lending_enabled = lending_enabled
+        self.deposits_enabled = deposits_enabled
+        self.deposit_buffer_horizon = int(deposit_buffer_horizon)
         self.available_opportunities = opportunities.copy() if opportunities is not None else []
         self.completed_investment_names = set()
         self.is_investing = False
@@ -106,6 +111,63 @@ class Trader(CellAgent):
 
         return lender_reservation_amount
 
+    def get_deposit_offer(self, depositor_id: int, principal: float) -> float | None:
+        """
+        The potential depository's passive evaluation of a deposit proposal.
+        Returns a final interest rate if acceptable, otherwise None.
+        """
+        # TEMPORARY DEBUG LOGGING
+        log_data = {
+            "agent_id": self.unique_id,
+            "step": self.model.steps,
+            "event": "get_deposit_offer_evaluation",
+            "depositor_id": depositor_id,
+        }
+
+        # Rule: Must be an active lender to accept deposits.
+        owned_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set())
+        my_active_loans = []
+        for cid in owned_contract_ids:
+            c = self.model.contracts_by_id.get(cid)
+            if (c and
+                c.contract_type == ContractType.TERM_LOAN and
+                c.creditor_id == self.unique_id and
+                c.status == ContractStatus.ACTIVE):
+                my_active_loans.append(c)
+        
+        log_data["active_loan_count"] = len(my_active_loans)
+        if not my_active_loans:
+            log_data["reason_for_no_offer"] = "not_an_active_lender"
+            self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
+            return None
+
+        # Rule: Bank's reservation rate is the average rate of its outstanding loans.
+        avg_loan_rate = sum(c.effective_term_rate for c in my_active_loans) / len(my_active_loans)
+        depository_reservation_rate = avg_loan_rate
+        log_data["depository_reservation_rate"] = depository_reservation_rate
+
+        depositor = self.model.get_agent_by_id(depositor_id)
+        if not depositor:
+            log_data["reason_for_no_offer"] = "depositor_not_found"
+            self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
+            return None
+        
+        # Rule: Depositor's reservation rate is their negative spoilage rate.
+        depositor_reservation_rate = -depositor.spoilage_rate
+        log_data["depositor_reservation_rate"] = depositor_reservation_rate
+
+        # A deal is only possible if the bank expects to earn more than it pays.
+        if depository_reservation_rate <= depositor_reservation_rate:
+            log_data["reason_for_no_offer"] = "no_deal_possible_rate_too_low"
+            self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
+            return None
+
+        # Rule: Final rate is the average of the two reservation rates.
+        final_rate = (depository_reservation_rate + depositor_reservation_rate) / 2
+        log_data["final_offer"] = final_rate
+        self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
+        return final_rate
+
     def get_capability(self, key):
         """Public getter for a capability."""
         return self._capabilities_DO_NOT_TOUCH[key]
@@ -124,8 +186,6 @@ class Trader(CellAgent):
         old_value = self._capabilities_DO_NOT_TOUCH.get(key)
         if hasattr(old_value, 'item'): old_value = old_value.item()
         if hasattr(value, 'item'): value = value.item()
-
-
 
         self._capabilities_DO_NOT_TOUCH[key] = value
 
@@ -170,8 +230,6 @@ class Trader(CellAgent):
         """Finds the best cell to forage from in the agent's vision, including its current cell."""
         vision = self.get_capability('vision')
 
-  
-            
         neighboring_cells = [
             cell
             for cell in self.cell.get_neighborhood(vision, include_center=True)
@@ -246,7 +304,9 @@ class Trader(CellAgent):
         if self.lending_enabled:
             pre_action_kit.append(TakeLoanAction)
         
-        post_action_kit = [] # Ready for future actions like deposits
+        post_action_kit = []
+        if self.deposits_enabled:
+            post_action_kit.extend([MakeDepositAction, CallDepositAction])
 
         # 2. Establish the baseline strategy (Foraging)
         forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)

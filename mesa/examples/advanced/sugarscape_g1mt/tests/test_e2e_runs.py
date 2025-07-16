@@ -6,6 +6,7 @@ import datetime
 import sys
 from pathlib import Path
 import pandas as pd
+import json
 
 # The import path is now handled by the conftest.py file.
 from sugarscape_g1mt import analysis_helpers as h
@@ -212,5 +213,86 @@ def test_flags_disable_features():
     cursor.execute("SELECT SUM(attribute_value) FROM agent_data WHERE run_id = ? AND attribute_name = 'is_investing'", (run_id2,))
     total_investing_time = cursor.fetchone()[0]
     assert total_investing_time is None or total_investing_time == 0, "Agents were investing even when investments were disabled."
+
+    conn.close()
+
+# sugarscape_g1mt/tests/test_e2e_runs.py
+
+# ... (keep all existing code in the file) ...
+
+@pytest.mark.e2e
+def test_deposits_and_calls():
+    """
+    Tests that the demand deposit functionality is working correctly by
+    running a simulation and checking for deposit creation.
+    """
+    # --- 1. Define and Execute the Simulation ---
+    # We use the same rich economic scenario as the lending/investment test,
+    # but with deposits enabled.
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    run_group_name = f"E2E_Test_Deposits_{timestamp}"
+
+    test_params = {
+        "total_steps": "100",
+        "run_group": run_group_name,
+        "replications": "1",
+        "seed": "42",
+        "initial_population": "100",
+        "agent_re_spawn": "false",
+        "endowment": "[5, 5]", # Low endowment to force financial activity
+        "age": "[1000, 1000]", # Prevent deaths by old age
+        "log_agent_data": "false", # Keep it fast for this test
+        "lending_enabled": "true",
+        "investments_enabled": "true",
+        "deposits_enabled": "true", # The key feature to test
+        "db": str(DB_PATH)
+    }
+
+    command = [sys.executable, "-m", "sugarscape_g1mt.run_batch"]
+    for key, value in test_params.items():
+        command.append(f"--{key}")
+        command.append(str(value))
+
+    working_dir = PROJECT_ROOT.parent
+    subprocess.run(command, check=True, cwd=working_dir)
+
+    # --- 2. Assert Economic Outcomes ---
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Get the run_id
+    cursor.execute("SELECT run_id FROM runs WHERE run_group = ?", (run_group_name,))
+    run_id_result = cursor.fetchone()
+    assert run_id_result is not None, "Failed to find the test run in the database."
+    run_id = run_id_result[0]
+
+    # Assertion 1: Check that deposits were actually created.
+    cursor.execute("""
+        SELECT SUM(reporter_value)
+        FROM model_results
+        WHERE run_id = ? AND reporter_name = 'Active Deposit Count'
+    """, (run_id,))
+    total_active_deposits_over_time = cursor.fetchone()[0]
+    assert total_active_deposits_over_time is not None and total_active_deposits_over_time > 0, \
+        "No active deposits were ever recorded during the simulation."
+
+    # Assertion 2: Check the ledger for a valid deposit contract structure.
+    cursor.execute("""
+        SELECT reporter_value FROM model_results
+        WHERE run_id = ? AND reporter_name = 'Ledger'
+        ORDER BY step DESC LIMIT 1
+    """, (run_id,))
+    final_ledger_json = cursor.fetchone()[0]
+    final_ledger = json.loads(final_ledger_json)
+
+    deposit_found_in_ledger = False
+    for contract_id, contract_data in final_ledger.items():
+        if contract_data.get("contract_type") == "DEMAND_DEPOSIT":
+            deposit_found_in_ledger = True
+            assert "current_principal" in contract_data, \
+                f"Demand deposit contract {contract_id} is missing 'current_principal' field."
+            break # Found one, no need to check further
+    
+    assert deposit_found_in_ledger, "No demand deposit contracts found in the final ledger."
 
     conn.close()
