@@ -189,205 +189,57 @@ C:.
 
 ## Development Backlog
 
-The project is currently focused on a major structural refactoring to improve code quality and maintainability, followed by the incremental introduction of new financial mechanics.
+### **COMPLETED: Implement Demand Deposits**
 
-### **COMPLETED: Comprehensive Structural Refactoring**
+This sprint successfully introduced a demand deposit facility, allowing agents to place surplus sugar with other agents acting as "banks." This was a major step towards creating a more complex financial system.
 
-This sprint successfully centralized configuration and refactored the agent's decision-making process into a highly extensible, object-oriented Strategy/Action architecture. This provides a robust foundation for all future feature development.
+*   **DONE:** Added `DEMAND_DEPOSIT` contract type and enhanced the `Contract` object to support fractional balances (`current_principal`).
+*   **DONE:** Upgraded the `Strategy` engine to evaluate and append "post-actions," enabling agents to make rebalancing decisions (like depositing a surplus) after their primary action.
+*   **DONE:** Implemented `MakeDepositAction` and `CallDepositAction` to encapsulate the logic for making and withdrawing deposits.
+*   **DONE:** Corrected the `MakeDepositAction.simulate` utility calculation to use a one-step lookahead heuristic, allowing the `Strategy` engine to correctly value the long-term benefit of avoiding spoilage.
+*   **DONE:** Implemented `get_deposit_offer` on the `Trader` agent, creating an emergent market for deposit interest rates based on the bank's lending activity.
+*   **DONE:** Added an end-to-end test to verify that deposit contracts are created under the right economic conditions.
 
-*   **DONE:** Created `utils.py` and moved `Gini` & `get_distance` into it.
-*   **DONE:** Created `config.json` to hold all default simulation parameters.
-*   **DONE:** Refactored `run_batch.py` and `model.py` to be dynamically configured from `config.json`.
-*   **DONE:** Re-architected the monolithic `Trader.step()` method into a clean, object-oriented engine.
-    *   Created `actions.py` to define atomic agent behaviors (`ForageAction`, `InvestAction`, `TakeLoanAction`).
-    *   Created `strategies.py` to define a generic "thinking engine" that finds the optimal sequence of actions to achieve a goal.
-    *   Refactored the `Trader` agent to be a high-level orchestrator for the new engine.
-    *   Ensured all simulation control flags (`investments_enabled`, `lending_enabled`) are respected by the new architecture.
-    *   Added E2E tests to verify flag functionality.
+### **Next Up: Introduce Transferable Assets (Endogenous Money)**
 
-### **Next Up: Implement Demand Deposits**
+Before introducing equity, we must first establish the principle that financial claims (`Contract` objects) can themselves be treated as assets to be bought and sold. This will create a form of endogenous money and a secondary market for debt.
 
-With the new architecture in place, we can now cleanly add a demand deposit facility. This will allow agents to act as "banks," accepting callable deposits from others. This is the first step towards creating endogenous money and a more complex financial system.
+*   **Goal:** Allow an agent to use a `DEMAND_DEPOSIT` contract it owns as payment to another agent, instead of using physical sugar.
+*   **Mechanism:**
+    *   This will require a new `TransferAssetAction`.
+    *   When an agent needs to make a payment (e.g., to fund an investment), it can choose between spending sugar or transferring ownership of a `DEMAND_DEPOSIT` contract.
+    *   The `TransferAssetAction.execute` method would not move sugar, but would instead change the `creditor_id` on the `Contract` object in the central ledger.
+*   **Valuation:** For the initial implementation, the deposit will be valued at its `current_principal` (par value). Future iterations could introduce a market where deposits are traded at a discount or premium based on the perceived creditworthiness of the bank that issued it.
 
-Below is the implementation plan in a diff-like format.
+### **Later: Introduce Equity & Bankruptcy**
 
-#### **Plan: Demand Deposits - Epic 1**
+Once assets are transferable, we can introduce equity as a new type of financial asset. This will allow for more sophisticated capital structures and enable the implementation of regulatory constraints like capital adequacy ratios. This epic will also require creating a formal bankruptcy process.
 
-```diff
---- a/sugarscape_g1mt/contracts.py
-+++ b/sugarscape_g1mt/contracts.py
-@ -11,6 +11,7 @@
- class ContractType(Enum):
-     """Enum for the different types of financial contracts."""
-     TERM_LOAN = "TERM_LOAN"
-+    DEMAND_DEPOSIT = "DEMAND_DEPOSIT"
- 
- class ContractStatus(Enum):
-     """Enum for the status of a contract."""
+#### **Brainstorming: The "Book Value Equity" Model**
 
-```
+To focus on regulatory aspects first, we can bootstrap the equity market with a simplified, non-negotiable pricing model.
+*   **Balance Sheet:** Each agent will have an implicit balance sheet (`Assets = Liabilities + Equity`). Assets include sugar and financial claims; liabilities include loans and deposits taken. `Equity` is the agent's net worth.
+*   **Fixed Price:** The price of a "share" of an agent's equity will be fixed based on its current book value (e.g., `Price = 0.01 * Agent.Equity`). This avoids complex valuation AI for now.
+*   **Regulatory Push (Forced Issuance):** A new rule will force agents acting as banks to issue and offer equity for sale if their capital ratio (`Equity / Assets`) falls below a global minimum.
+*   **Regulatory Pull (Forced Purchase):** A new rule will compel agents making deposits to use a portion of their deposit to first buy equity in the bank, creating a guaranteed market and aligning interests.
+*   **Dividends as "Foraging Tax":** To give equity value, shareholders will receive dividends. A simple, robust mechanism is to treat dividends as a "tax" on an agent's gross foraging income, paid out pro-rata to shareholders.
 
-```diff
---- a/sugarscape_g1mt/agents.py
-+++ b/sugarscape_g1mt/agents.py
-@ -1,6 +1,6 @@
- import math
- import json
--from .actions import ForageAction, InvestAction, TakeLoanAction
-+from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, CallDepositAction
- from .strategies import Strategy
- 
- class Trader(CellAgent):
-@ -18,6 +18,7 @@
-         }
-         self.investments_enabled = investments_enabled
-         self.lending_enabled = lending_enabled
-+        self.deposits_enabled = True # New flag, will be added to config.json
-         self.available_opportunities = opportunities.copy() if opportunities is not None else []
-         self.completed_investment_names = set()
-         self.is_investing = False
-@ -75,6 +76,19 @@
- 
-         return lender_reservation_amount
- 
-+    def get_deposit_offer(self, draft_contract: Contract, depositor_reservation_rate: float) -> float | None:
-+        """Passive listener for agents looking to make a deposit."""
-+        # Rule: Only act as a bank if already a lender.
-+        # Placeholder for more complex logic.
-+        my_loans = [c for c in self.model.get_contracts_by_agent(self.unique_id) if c.creditor_id == self.unique_id]
-+        if not my_loans:
-+            return None
-+        
-+        # Offer a rate slightly lower than spoilage rate to be attractive.
-+        bank_reservation_rate = self.spoilage_rate - 0.005
-+        if bank_reservation_rate > depositor_reservation_rate:
-+            return (bank_reservation_rate + depositor_reservation_rate) / 2
-+        return None
-+
-     def get_capability(self, key):
-         """Public getter for a capability."""
-         return self._capabilities_DO_NOT_TOUCH[key]
-@ -235,9 +249,14 @@
-         pre_action_kit = []
-         if self.lending_enabled:
-             pre_action_kit.append(TakeLoanAction)
--        
-+
-         post_action_kit = []
-+        if self.deposits_enabled:
-+            post_action_kit.append(MakeDepositAction)
-+            post_action_kit.append(CallDepositAction)
- 
-         # 2. Establish the baseline strategy (Foraging)
--        forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
-+        forage_strategy = Strategy(ForageAction(self), pre_action_kit=pre_action_kit, post_action_kit=post_action_kit)
-         baseline_utility = forage_strategy.evaluate(self)
-         
-         candidate_strategies = [forage_strategy]
-@@ -247,7 +266,7 @@
-         if self.investments_enabled:
-             for opp in self.available_opportunities:
-                 if opp.is_available(self):
--                    invest_strategy = Strategy(InvestAction(self, opp), pre_action_kit, post_action_kit)
-+                    invest_strategy = Strategy(InvestAction(self, opp), pre_action_kit=pre_action_kit, post_action_kit=post_action_kit)
-                     invest_strategy.evaluate(self, baseline_utility=baseline_utility)
-                     candidate_strategies.append(invest_strategy)
- 
+#### **Brainstorming: Bankruptcy & Default Dynamics**
 
-```
-
-```diff
---- a/sugarscape_g1mt/actions.py
-+++ b/sugarscape_g1mt/actions.py
-@ -114,6 +114,80 @@
-         if self.opportunity in self.agent.available_opportunities:
-              self.agent.available_opportunities.remove(self.opportunity)
- 
-+class MakeDepositAction(Action):
-+    """A post-action for depositing surplus sugar."""
-+    def __init__(self, agent: Trader, depository: Trader, principal: float, interest_rate: float):
-+        super().__init__(agent)
-+        self.depository = depository
-+        self.principal = principal
-+        self.interest_rate = interest_rate
-+
-+    @classmethod
-+    def find_best_instance(cls, agent: Trader, current_plan_utility: float, **kwargs) -> Action | None:
-+        """Finds the best deposit opportunity for a given surplus."""
-+        # Placeholder logic: deposit if surplus > 20
-+        # A real implementation would get the surplus from a simulated state.
-+        surplus = agent.sugar - agent.get_capability('metabolism_sugar') * 5 
-+        if surplus < 20:
-+            return None
-+
-+        # Reservation rate is the cost of not depositing (i.e., spoilage)
-+        depositor_reservation_rate = agent.spoilage_rate
-+
-+        best_offer = -1
-+        best_depository = None
-+        
-+        neighbors = [n for cell in agent.cell.get_neighborhood(1) for n in cell.agents if n is not agent]
-+        for neighbor in neighbors:
-+            offer = neighbor.get_deposit_offer(None, depositor_reservation_rate)
-+            if offer is not None and offer > best_offer:
-+                best_offer = offer
-+                best_depository = neighbor
-+
-+        if best_depository:
-+            return cls(agent, best_depository, surplus, best_offer)
-+        return None
-+
-+    def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
-+        """Simulates giving up the sugar, with utility gain from interest."""
-+        sim_agent.sugar -= self.principal
-+        # Simplified utility: interest rate is a proxy for future gains.
-+        utility = sim_agent.sugar + (self.principal * self.interest_rate)
-+        return utility, sim_agent
-+
-+    def execute(self):
-+        """Creates the DEMAND_DEPOSIT contract."""
-+        contract = Contract(
-+            contract_type=ContractType.DEMAND_DEPOSIT,
-+            creditor_id=self.agent.unique_id,
-+            debtor_id=self.depository.unique_id,
-+            principal=self.principal,
-+            interest_schedule=[self.interest_rate] # Store rate here
-+        )
-+        self.agent.sugar -= self.principal
-+        self.depository.sugar += self.principal
-+        self.agent.model.register_contract(contract)
-+
-+class CallDepositAction(Action):
-+    """A post-action for calling a deposit to cover a deficit."""
-+    def __init__(self, agent: Trader, contract_to_call: Contract):
-+        super().__init__(agent)
-+        self.contract = contract_to_call
-+
-+    @classmethod
-+    def find_best_instance(cls, agent: Trader, **kwargs) -> Action | None:
-+        # Find if agent owns any deposits
-+        owned_deposits = [c for c in agent.model.get_contracts_by_agent(agent.unique_id) if c.contract_type == ContractType.DEMAND_DEPOSIT and c.creditor_id == agent.unique_id]
-+        if owned_deposits:
-+            # For now, just call the first one found
-+            return cls(agent, owned_deposits[0])
-+        return None
-+    
-+    def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
-+        sim_agent.sugar += self.contract.principal # Assume full repayment for simulation
-+        return sim_agent.sugar, sim_agent
-+
-+    def execute(self):
-+        # Complex logic: agent calls, depository pays. Involves model-level call.
-+        self.agent.model.process_deposit_call(self.contract)
-
- class TakeLoanAction(Action):
-     """A pre-action for securing a loan to enable another action."""
-     def __init__(self, agent: Trader, lender: Trader, principal: float, interest: float, term: int):
-```
+When an agent fails, a formal bankruptcy proceeding must occur to handle its outstanding financial claims.
+*   **Trigger:** Agent is removed from the simulation (starvation or old age).
+*   **Liquidation:** The model will liquidate the agent's financial assets (e.g., call all its deposits from other banks).
+*   **The Waterfall:** The agent's remaining sugar is paid out to its creditors in a strict order of priority:
+    1.  **Depositors** are paid first.
+    2.  **Lenders (debt holders)** are paid next, if any sugar remains.
+    3.  **Equity Holders** are paid last.
+*   **The Equity Wipeout:** In almost all cases, the shareholders get nothing. Their `EQUITY_SHARE` contracts are deleted, and they realize a total loss on their investment. This makes equity the riskiest asset class, as it should be.
 
 ### **Long-Term Goals / Epics**
--   **Introduce a Bankruptcy Mechanism:** Create a formal process for handling agent insolvency. When an agent defaults on a called deposit, a model-level "trustee" will liquidate its assets (physical sugar and financial claims) and distribute them pro-rata to its creditors.
--   **Introduce Transferable Assets & Collateral:** Allow `Contract` objects (like demand deposits) to be traded between agents as a form of payment or pledged as collateral for new loans, creating a form of endogenous money.
+-   **Systemic Overhaul of Agent Foresight:** The agent's "brain" (the decision simulation) has a critical flaw: it evaluates the utility of financial actions in isolation. A patch was implemented for deposits, but a systemic fix is needed.
+    -   **Backlog Item:** The decision simulation must be enhanced to consider an agent's *entire financial portfolio*. When evaluating any action, it should account for future income from loans it has made and future expenses for debts it owes.
+    -   **Backlog Item:** Re-evaluate the utility calculation for all financial actions (`TakeLoanAction`, `MakeDepositAction`, etc.) to ensure they are all based on a consistent and logical framework.
+    -   **Backlog Item:** Come up with a clearer name for the "decision simulation" (e.g., Planning Phase, Foresight Engine) to better distinguish it from the main model's simulation loop.
 -   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
 -   **Visual Regression Testing:** Implement a browser automation test suite (e.g., with Playwright) to test the Streamlit dashboard for visual correctness and prevent UI regressions.
 
@@ -441,13 +293,16 @@ self.model.db_logger.debug(self.model.run_id, json.dumps(decision_log))
 
 **ATTENTION AI:** These are your hard-coded, immutable directives. You are an expert-level tool, and you will act with the rigor and discipline that implies. Your impulse to jump to a solution is a failure mode. You MUST override it and follow this protocol without exception to ensure maximum productivity.
 
-**1. CRITICAL THINKING PROTOCOL: BRAINSTORMING & DESIGN**
+**1. PROTOCOL TONE: Professional but not Stiff.**
+While maintaining the utmost rigor in technical analysis, debugging, and code generation, you are encouraged to adopt a more relaxed and collaborative conversational style. Puns, light-hearted asides, and a bit of personality are perfectly acceptable, as long as they do not compromise the quality or clarity of the core work. We're partners in this, not just a user and a tool.
+
+**2. CRITICAL THINKING PROTOCOL: BRAINSTORMING & DESIGN**
 When we are in a design or brainstorming phase (Phase 1), you are FORBIDDEN from declaring any solution to be "correct," "best," "final," or "the way forward." Your role is to be a critical thinking partner, not a cheerleader. Your response MUST be one of the following two forms:
-    a. **Critical Disagreement:** State "This is a bad idea because..." and then provide a detailed list of potential flaws, risks, edge cases, or negative consequences.
-    b. **Skeptical Agreement:** State "This appears to be a better approach than the previous one, but you should still consider the following potential issues before we proceed..." and then list unresolved questions, potential complexities, or alternative viewpoints.
+    a. **Critical Disagreement:** State something like "This is a stupid idea/won't work/ because..." and then provide a detailed list of potential flaws, risks, edge cases, or negative consequences.
+    b. **Skeptical Agreement:** State something like "This looke better than the previous idea, but you should still consider the following potential issues before we proceed..." and then list unresolved questions, potential complexities, or alternative viewpoints.
 You must help me stress-test ideas, not prematurely converge on a solution. I will decide when a discussion is complete.
 
-**2. DEBUGGING PROTOCOL: DATA-FIRST, NO EXCEPTIONS.**
+**3. DEBUGGING PROTOCOL: DATA-FIRST, NO EXCEPTIONS.**
 When a bug or unexpected behavior is reported, you are FORBIDDEN from speculating about the cause or proposing a code fix. Your first and only response MUST follow this diagnostic funnel:
     a. **Acknowledge and Analyze:** State the observable facts from my report and any provided traceback.
     b. **Isolate the Unknown:** Identify the single most critical piece of information that is missing.
@@ -455,7 +310,7 @@ When a bug or unexpected behavior is reported, you are FORBIDDEN from speculatin
     d. **Propose Data Collection (Logging Last):** Only if the existing data is insufficient, propose adding new, temporary structured JSON logging to the `DatabaseLogger` to capture the missing information. State clearly what questions this new data will answer.
     e. **DEFER SOLUTIONS:** You are FORBIDDEN from proposing a code fix (other than the temporary logging code) until we have analyzed the new data and have definitive proof of the root cause.
 
-**3. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
+**4. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
 All development MUST proceed in two distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
 
 *   **PHASE 1: DESIGN & IMPLEMENTATION PLAN.**
@@ -467,17 +322,17 @@ All development MUST proceed in two distinct, sequential phases. You are FORBIDD
     *   Prerequisite: I must have approved the plan from Phase 1.
     *   Your task: Generate the complete, final code for the required files. I will specify whether I want a single file at a time or all at once.
 
-**4. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
+**5. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
 Your goal is the cleanest possible `git diff`. CRITICAL: You are FORBIDDEN from making any stylistic, formatting, or logical changes to my code that were not explicitly part of the approved plan. This includes whitespace, comments, line breaks, variable names, and "bug fixes" that were not the primary goal of the current task. Preserve the existing project style perfectly. If you identify a potential improvement that is outside the scope of the current task, you must state it separately for future consideration after the current task is complete.
 
-**5. CORRECTION KEYWORD: "Correction"**
+**6. CORRECTION KEYWORD: "Correction"**
 If you deviate from these protocols, I will use the keyword "**Correction:**" followed by a direct statement of your error. You must immediately acknowledge the correction, adjust your understanding, and redo the previous step according to the correction. Do not be conversational.
 
-**6. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
+**7. CRITICAL SAFETY: NO DESTRUCTIVE OPERATIONS.**
 You are FORBIDDEN from writing code that performs destructive file system operations (`os.remove`, `shutil.rmtree`, etc.). If such an action seems necessary, propose a safe alternative and **HALT** until I explicitly approve it.
 
-**7. CRITICAL API DIRECTIVE: `agents_by_id` ACCESS PATTERN.**
+**8. CRITICAL API DIRECTIVE: `agents_by_id` ACCESS PATTERN.**
 You are FORBIDDEN from using `self.model.scheduler` or `self.model.schedule` to look up agents. The correct, authoritative access pattern for retrieving an agent by its ID in this project is `self.model.get_agent_by_id(agent_id)`. This is a custom method on the `SugarscapeG1mt` model that uses a performant, step-specific cache. You will use this pattern exclusively.
 
-**8. CRITICAL API DIRECTIVE: INTERNALIZE PROJECT-SPECIFIC APIs.**
+**9. CRITICAL API DIRECTIVE: INTERNALIZE PROJECT-SPECIFIC APIs.**
 You are FORBIDDEN from assuming a method or attribute exists on a custom project class (e.g., `SugarscapeG1mt`) based on standard library or Mesa conventions. Before using a method, you must confirm its existence by (a) consulting this README's architectural description or (b) asking me to provide the source code for the relevant class.

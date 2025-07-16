@@ -6,6 +6,7 @@ import datetime
 import sys
 from pathlib import Path
 import pandas as pd
+import json
 
 # The import path is now handled by the conftest.py file.
 from sugarscape_g1mt import analysis_helpers as h

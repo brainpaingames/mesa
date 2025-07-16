@@ -116,7 +116,15 @@ class Trader(CellAgent):
         The potential depository's passive evaluation of a deposit proposal.
         Returns a final interest rate if acceptable, otherwise None.
         """
-# Rule: Must be an active lender to accept deposits.
+        # TEMPORARY DEBUG LOGGING
+        log_data = {
+            "agent_id": self.unique_id,
+            "step": self.model.steps,
+            "event": "get_deposit_offer_evaluation",
+            "depositor_id": depositor_id,
+        }
+
+        # Rule: Must be an active lender to accept deposits.
         owned_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set())
         my_active_loans = []
         for cid in owned_contract_ids:
@@ -126,27 +134,38 @@ class Trader(CellAgent):
                 c.creditor_id == self.unique_id and
                 c.status == ContractStatus.ACTIVE):
                 my_active_loans.append(c)
-
+        
+        log_data["active_loan_count"] = len(my_active_loans)
         if not my_active_loans:
+            log_data["reason_for_no_offer"] = "not_an_active_lender"
+            self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
             return None
 
         # Rule: Bank's reservation rate is the average rate of its outstanding loans.
         avg_loan_rate = sum(c.effective_term_rate for c in my_active_loans) / len(my_active_loans)
         depository_reservation_rate = avg_loan_rate
+        log_data["depository_reservation_rate"] = depository_reservation_rate
 
         depositor = self.model.get_agent_by_id(depositor_id)
         if not depositor:
+            log_data["reason_for_no_offer"] = "depositor_not_found"
+            self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
             return None
         
         # Rule: Depositor's reservation rate is their negative spoilage rate.
         depositor_reservation_rate = -depositor.spoilage_rate
+        log_data["depositor_reservation_rate"] = depositor_reservation_rate
 
         # A deal is only possible if the bank expects to earn more than it pays.
         if depository_reservation_rate <= depositor_reservation_rate:
+            log_data["reason_for_no_offer"] = "no_deal_possible_rate_too_low"
+            self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
             return None
 
         # Rule: Final rate is the average of the two reservation rates.
         final_rate = (depository_reservation_rate + depositor_reservation_rate) / 2
+        log_data["final_offer"] = final_rate
+        self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
         return final_rate
 
     def get_capability(self, key):

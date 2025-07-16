@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import math
+import json
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, List, Type
 
@@ -141,15 +142,30 @@ class MakeDepositAction(Action):
     @classmethod
     def find_best_instance(cls, agent: Trader, sim_agent_state: SimulatedAgent, **kwargs) -> Action | None:
         """Finds the best deposit opportunity for a given end-of-turn surplus."""
+        # TEMPORARY DEBUG LOGGING
+        log_data = {
+            "agent_id": agent.unique_id,
+            "step": agent.model.steps,
+            "event": "make_deposit_evaluation",
+            "initial_simulated_sugar": sim_agent_state.sugar,
+            "metabolism": agent.get_capability('metabolism_sugar'),
+            "deposit_buffer_horizon": agent.deposit_buffer_horizon,
+            "neighbors_polled": []
+        }
+        
         # Use the deposit_buffer_horizon to determine "true" surplus
         metabolism = agent.get_capability('metabolism_sugar')
         buffer_sugar = metabolism * agent.deposit_buffer_horizon
         surplus = sim_agent_state.sugar - buffer_sugar
+        log_data["calculated_surplus"] = surplus
 
         if surplus <= 0:
+            log_data["reason_for_no_deal"] = "insufficient_surplus"
+            # agent.model.db_logger.debug(agent.model.run_id, json.dumps(log_data))
             return None
 
         depositor_reservation_rate = -agent.spoilage_rate
+        log_data["depositor_reservation_rate"] = depositor_reservation_rate
         
         best_offer = -math.inf
         best_depository = None
@@ -158,23 +174,42 @@ class MakeDepositAction(Action):
         neighbors = [n for cell in agent.cell.get_neighborhood(agent.lender_vision) for n in cell.agents if n is not agent]
         for neighbor in neighbors:
             offer = neighbor.get_deposit_offer(agent.unique_id, surplus)
+            log_data["neighbors_polled"].append({"neighbor_id": neighbor.unique_id, "offer_received": offer})
             if offer is not None and offer > depositor_reservation_rate and offer > best_offer:
                 best_offer = offer
                 best_depository = neighbor
         
         if best_depository:
             final_rate = best_offer # The offer is the final rate
+            log_data["final_decision"] = best_depository.unique_id
+            # agent.model.db_logger.debug(agent.model.run_id, json.dumps(log_data))
             return cls(agent, best_depository, surplus, final_rate)
         
+        log_data["reason_for_no_deal"] = "no_acceptable_offers"
+        # agent.model.db_logger.debug(agent.model.run_id, json.dumps(log_data))
         return None
 
     def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
-        """Simulates giving up the sugar. Utility is based on sugar level."""
-        sim_agent.sugar -= self.principal
-        # The utility of the *plan* is not changed by this rebalancing action.
-        # The decision to do it was based on beating spoilage, but the overall
-        # plan's value (e.g. from foraging) is what matters.
-        return sim_agent.sugar, sim_agent
+        """
+        Calculates the utility of making a deposit using a one-step lookahead,
+        comparing the value of spoiled sugar vs. interest-gaining principal.
+        """
+        # 1. Calculate the agent's sugar level immediately after making the deposit.
+        sugar_after_deposit = sim_agent.sugar - self.principal
+
+        # 2. Estimate the value of the deposited principal after one step (it gains interest).
+        deposit_value_next_step = self.principal * (1 + self.interest_rate)
+
+        # 3. Estimate the value of the agent's remaining sugar after one step (it spoils).
+        remaining_sugar_next_step = sugar_after_deposit * (1 - self.agent.spoilage_rate)
+
+        # 4. The total utility is the agent's total expected wealth in the next step.
+        utility = remaining_sugar_next_step + deposit_value_next_step
+
+        # 5. The new state of the sim_agent reflects the immediate sugar loss.
+        sim_agent.sugar = sugar_after_deposit
+        
+        return utility, sim_agent
 
     def execute(self):
         """Creates the DEMAND_DEPOSIT contract and transfers sugar."""
@@ -249,7 +284,6 @@ class TakeLoanAction(Action):
         """
         Contains all logic for discovering and negotiating a loan.
         """
-        # ... (rest of TakeLoanAction is unchanged)
         opportunity = core_action_to_enable.opportunity
         
         # Calculate how much sugar is needed
@@ -295,8 +329,6 @@ class TakeLoanAction(Action):
     def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
         """Simulates receiving the loan principal."""
         sim_agent.sugar += self.principal
-        # Taking a loan does not change the total utility of the state itself,
-        # it just enables other actions. The utility is reflected in the final sugar.
         return sim_agent.sugar, sim_agent
 
     def execute(self):
