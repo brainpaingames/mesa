@@ -88,6 +88,11 @@ class SugarscapeG1mt(mesa.Model):
 
         self.active_investment_portfolio = self._load_investment_portfolio()
 
+        # Helper to get a list of new loan contracts for reporters
+        def get_new_contracts_by_type(model, contract_type):
+            return [model.contracts_by_id[cid] for cid in model.new_contracts_this_step 
+                    if model.contracts_by_id[cid].contract_type == contract_type]
+
         self.datacollector = mesa.DataCollector(
             model_reporters={
                 "#Traders": lambda m: len(m.agents),
@@ -100,6 +105,12 @@ class SugarscapeG1mt(mesa.Model):
                 "Total Loan Principal": lambda m: sum(c.principal for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE and c.contract_type == ContractType.TERM_LOAN),
                 "Active Deposit Count": lambda m: sum(1 for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE and c.contract_type == ContractType.DEMAND_DEPOSIT),
                 "Total Deposit Principal": lambda m: sum(c.current_principal for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE and c.contract_type == ContractType.DEMAND_DEPOSIT),
+                "Avg Loan Rate (Per-Step)": lambda m: 
+                    np.mean([c.per_step_rate for c in get_new_contracts_by_type(m, ContractType.TERM_LOAN)]) 
+                    if len(get_new_contracts_by_type(m, ContractType.TERM_LOAN)) > 0 else 0,
+                "Avg Deposit Rate (Per-Step)": lambda m:
+                    np.mean([c.per_step_rate for c in get_new_contracts_by_type(m, ContractType.DEMAND_DEPOSIT)])
+                    if len(get_new_contracts_by_type(m, ContractType.DEMAND_DEPOSIT)) > 0 else 0,
                 "Ledger": lambda m: m.get_ledger_snapshot(),
             },
         )
@@ -112,6 +123,7 @@ class SugarscapeG1mt(mesa.Model):
         self.contracts_by_id = {}
         self.contracts_by_agent = defaultdict(set)
         self.next_contract_id = 0
+        self.new_contracts_this_step = []
 
         if self.db_logger and self.run_id is not None:
             self.db_logger.log_static_run_parameter(
@@ -164,6 +176,7 @@ class SugarscapeG1mt(mesa.Model):
         self.contracts_by_id[new_id] = draft_contract
         self.contracts_by_agent[draft_contract.creditor_id].add(new_id)
         self.contracts_by_agent[draft_contract.debtor_id].add(new_id)
+        self.new_contracts_this_step.append(new_id) # Track for this step's reporters
         self.next_contract_id += 1
         return new_id
 
@@ -293,6 +306,7 @@ class SugarscapeG1mt(mesa.Model):
         A unique step function that does staged activation.
         """
         self._agents_by_id_cache = None
+        self.new_contracts_this_step.clear()
 
         self.grid.sugar.data = np.minimum(
             self.grid.sugar.data + self.sugar_regrowth_rate, self.sugar_distribution

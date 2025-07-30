@@ -243,6 +243,10 @@ When an agent fails, a formal bankruptcy proceeding must occur to handle its out
 -   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
 -   **Visual Regression Testing:** Implement a browser automation test suite (e.g., with Playwright) to test the Streamlit dashboard for visual correctness and prevent UI regressions.
 
+### Known issues / Bugs
+
+- setting flag agent_spoilage rate and trying to enable deposits will cause no depositst to be nmade in the simulaiton. Don't know why.
+
 ---
 ## Using the DatabaseLogger
 

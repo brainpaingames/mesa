@@ -65,3 +65,18 @@ class Contract:
         if self.principal == 0:
             return 0.0
         return self.interest_amount / self.principal
+
+    @property
+    def per_step_rate(self) -> float:
+        """
+        Returns a comparable, per-step interest rate for any contract type.
+        """
+        if self.contract_type == ContractType.TERM_LOAN:
+            if self.term_steps and self.term_steps > 0:
+                # Convert the term rate to a simple per-step rate
+                return self.effective_term_rate / self.term_steps
+        elif self.contract_type == ContractType.DEMAND_DEPOSIT:
+            if self.interest_schedule:
+                # The stored deposit rate is already a per-step rate
+                return self.interest_schedule[0]
+        return 0.0
