@@ -4,10 +4,12 @@ from __future__ import annotations
 import math
 import json
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Type
+from typing import TYPE_CHECKING, List, Type, Tuple
+import copy
 
 from .contracts import Contract, ContractType, ContractStatus
 from .investment import SimulatedAgent
+from .transactions import AssetType, TransferLeg, TransactionManifest
 
 if TYPE_CHECKING:
     from .agents import Trader
@@ -95,8 +97,8 @@ class InvestAction(Action):
         self.opportunity = opportunity
 
     def get_enabler_action_types(self) -> List[Type[Action]]:
-        """An investment can be enabled by taking a loan."""
-        return [TakeLoanAction]
+        """An investment can be enabled by taking a loan or converting assets."""
+        return [TakeLoanAction, ConvertDepositToSugarAction]
 
     def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
         """
@@ -345,3 +347,138 @@ class TakeLoanAction(Action):
         self.lender.sugar -= self.principal
         self.agent.sugar += self.principal
         self.agent.model.register_contract(final_contract)
+
+
+class ConvertDepositToSugarAction(Action):
+    """
+    A self-contained action for liquidating deposits to generate sugar.
+    Its planner uses the "No-Split-First" greedy heuristic.
+    """
+    def __init__(self, agent: Trader, manifest: TransactionManifest, sugar_to_generate: float):
+        super().__init__(agent)
+        self.manifest = manifest
+        self.sugar_to_generate = sugar_to_generate
+        self.is_split_trade = {} # Cache for execution logic
+
+    @classmethod
+    def find_best_instance(cls, agent: Trader, core_action_to_enable: Action, **kwargs) -> Action | None:
+        """The 'Planner'. Builds a transaction manifest to cover a sugar shortfall."""
+        if not isinstance(core_action_to_enable, InvestAction):
+            return None
+        
+        opportunity = core_action_to_enable.opportunity
+        cost_of_survival = opportunity.cost["metabolism_during_investment"] * (opportunity.cost["duration"] + 1)
+        shortfall = max(0, cost_of_survival - agent.sugar)
+
+        if shortfall <= 0:
+            return None
+
+        # --- 1. Pre-computation & Sanity Checks ---
+        neighbors = [n for cell in agent.cell.get_neighborhood(agent.vision) for n in cell.agents if n.sugar > 0]
+        total_neighbor_sugar = sum(n.sugar for n in neighbors)
+
+        owned_cids = agent.model.contracts_by_agent.get(agent.unique_id, set())
+        deposits = [
+            (cid, copy.copy(agent.model.contracts_by_id[cid])) for cid in owned_cids
+            if agent.model.contracts_by_id.get(cid) and
+               agent.model.contracts_by_id[cid].contract_type == ContractType.DEMAND_DEPOSIT and
+               agent.model.contracts_by_id[cid].creditor_id == agent.unique_id and
+               agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE
+        ]
+        total_agent_principal = sum(c.current_principal for _, c in deposits)
+
+        if total_neighbor_sugar < shortfall or total_agent_principal < shortfall:
+            return None
+
+        # --- 2. The "No-Split-First" Greedy Loop ---
+        manifest: TransactionManifest = []
+        needed_sugar = shortfall
+        
+        # Sort resources according to heuristics
+        deposits.sort(key=lambda item: item[1].current_principal)
+        
+        while needed_sugar > 1e-6: # Use tolerance for float comparison
+            # Find current best resources
+            neighbors.sort(key=lambda n: n.sugar, reverse=True)
+            
+            # Filter out used-up resources
+            neighbors = [n for n in neighbors if n.sugar > 1e-6]
+            deposits = [(cid, c) for cid, c in deposits if c.current_principal > 1e-6]
+
+            if not neighbors or not deposits:
+                break # Ran out of resources
+
+            richest_neighbor = neighbors[0]
+            smallest_deposit_id, smallest_deposit = deposits[0]
+
+            # --- 3. The "No-Split" Rule ---
+            s_rich = richest_neighbor.sugar
+            p_small = smallest_deposit.current_principal
+            is_split = False
+
+            if s_rich >= p_small:
+                trade_amount = p_small # Use the whole deposit
+            else: # s_rich < p_small
+                trade_amount = s_rich # Forced to split to get the last sugar
+                is_split = True
+
+            # --- 4. Build Manifest Legs for this Trade ---
+            sugar_leg = TransferLeg(AssetType.SUGAR, trade_amount, richest_neighbor.unique_id, agent.unique_id)
+            deposit_leg = TransferLeg(AssetType.DEMAND_DEPOSIT, trade_amount, agent.unique_id, richest_neighbor.unique_id, asset_id=smallest_deposit_id)
+            manifest.extend([sugar_leg, deposit_leg])
+            
+            # This is a temporary cache used by execute() to know which model function to call.
+            # We associate it with the deposit leg's unique tuple representation.
+            cls.is_split_trade[(deposit_leg.asset_id, deposit_leg.amount, deposit_leg.dest_agent_id)] = is_split
+
+            # --- 5. Update State for Next Loop Iteration ---
+            needed_sugar -= trade_amount
+            richest_neighbor.sugar -= trade_amount # Simulate change
+            smallest_deposit.current_principal -= trade_amount # Simulate change
+
+        if manifest:
+            sugar_generated = shortfall - needed_sugar
+            return cls(agent, manifest, sugar_generated)
+        
+        return None
+
+    def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
+        """The 'Simulator'. Simply adds the generated sugar to the sim_agent."""
+        sim_agent.sugar += self.sugar_to_generate
+        return sim_agent.sugar, sim_agent
+
+    def execute(self):
+        """The 'Executor'. Reads the manifest and calls the correct model functions."""
+        # A bit of a hack to pass the is_split info from the planner to the executor
+        is_split_cache = self.__class__.is_split_trade
+        
+        for leg in self.manifest:
+            source_agent = self.agent.model.get_agent_by_id(leg.source_agent_id)
+            dest_agent = self.agent.model.get_agent_by_id(leg.dest_agent_id)
+            if not source_agent or not dest_agent: continue
+
+            if leg.asset_type == AssetType.SUGAR:
+                source_agent.sugar -= leg.amount
+                dest_agent.sugar += leg.amount
+            
+            elif leg.asset_type == AssetType.DEMAND_DEPOSIT:
+                key = (leg.asset_id, leg.amount, leg.dest_agent_id)
+                is_split = is_split_cache.get(key, False)
+
+                if is_split:
+                    original_contract = self.agent.model.contracts_by_id.get(leg.asset_id)
+                    if not original_contract: continue
+                    remaining_principal = original_contract.current_principal - leg.amount
+                    
+                    self.agent.model.split_contract(
+                        original_contract_id=leg.asset_id,
+                        split_definitions=[
+                            (remaining_principal, source_agent.unique_id),
+                            (leg.amount, dest_agent.unique_id)
+                        ]
+                    )
+                else: # No-split case
+                    self.agent.model.transfer_contract_ownership(
+                        contract_id=leg.asset_id,
+                        new_creditor_id=dest_agent.unique_id
+                    )

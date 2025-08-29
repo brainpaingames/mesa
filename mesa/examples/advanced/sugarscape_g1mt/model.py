@@ -3,6 +3,8 @@
 from pathlib import Path
 import numpy as np
 import mesa
+import math
+from typing import List
 from mesa.discrete_space import OrthogonalVonNeumannGrid
 from mesa.discrete_space.property_layer import PropertyLayer
 from .agents import Trader
@@ -186,9 +188,91 @@ class SugarscapeG1mt(mesa.Model):
             contract = self.contracts_by_id[contract_id]
             contract.status = new_status
 
-            if new_status in [ContractStatus.REPAID, ContractStatus.DEFAULTED, ContractStatus.CLOSED]:
+            if new_status in [ContractStatus.REPAID, ContractStatus.DEFAULTED, ContractStatus.CLOSED, ContractStatus.SPLIT]:
                 self.contracts_by_agent[contract.creditor_id].discard(contract_id)
                 self.contracts_by_agent[contract.debtor_id].discard(contract_id)
+
+    def transfer_contract_ownership(self, contract_id: int, new_creditor_id: int):
+        """
+        Atomically transfers ownership of a contract from one creditor to another.
+        This is the authoritative method for a "no-split" transfer, ensuring
+        the ledger and its indexes remain consistent.
+        """
+        contract = self.contracts_by_id.get(contract_id)
+        if not contract:
+            raise ValueError(f"Contract ID {contract_id} not found in ledger.")
+        
+        if contract.status != ContractStatus.ACTIVE:
+            raise ValueError(f"Contract {contract_id} is not ACTIVE and cannot be transferred.")
+
+        old_creditor_id = contract.creditor_id
+        if old_creditor_id == new_creditor_id:
+            return # No change needed
+
+        # 1. Update the master record
+        contract.creditor_id = new_creditor_id
+
+        # 2. Update the fast lookup index
+        self.contracts_by_agent[old_creditor_id].discard(contract_id)
+        self.contracts_by_agent[new_creditor_id].add(contract_id)
+
+        # Mark the original as closed since its primary creditor has changed.
+        self.update_contract_status(contract_id, ContractStatus.CLOSED)
+
+    def split_contract(self, original_contract_id: int, split_definitions: List[tuple[float, int]]) -> List[int]:
+        """
+        Atomically splits an existing contract into multiple new ones based on a
+        list of (principal, new_creditor) definitions.
+
+        This is the authoritative method for the "Retire and Create" pattern,
+        ensuring the ledger remains consistent.
+
+        Args:
+            original_contract_id: The ID of the contract to split (must be ACTIVE).
+            split_definitions: A list of tuples, where each tuple is
+                               (principal_amount, new_creditor_id).
+
+        Returns:
+            A list of the new contract IDs created.
+        """
+        original_contract = self.contracts_by_id.get(original_contract_id)
+        if not original_contract:
+            raise ValueError(f"Contract ID {original_contract_id} not found in ledger.")
+        
+        if original_contract.status != ContractStatus.ACTIVE:
+            raise ValueError(f"Contract {original_contract_id} is not ACTIVE and cannot be split.")
+
+        # --- 1. Validation ---
+        total_split_principal = sum(amount for amount, cid in split_definitions)
+        if not math.isclose(total_split_principal, original_contract.current_principal):
+            raise ValueError(
+                f"Sum of split principals ({total_split_principal}) does not match "
+                f"original contract's current principal ({original_contract.current_principal})."
+            )
+
+        # --- 2. Execution: Create new child contracts ---
+        new_contract_ids = []
+        for principal, creditor_id in split_definitions:
+            if principal <= 0: continue
+
+            new_contract = Contract(
+                contract_type=original_contract.contract_type,
+                creditor_id=creditor_id,
+                debtor_id=original_contract.debtor_id,
+                principal=principal,
+                interest_schedule=original_contract.interest_schedule,
+                is_transferable=original_contract.is_transferable,
+                parent_contract_id=original_contract_id,
+                issue_step=self.steps
+            )
+            new_id = self.register_contract(new_contract)
+            new_contract_ids.append(new_id)
+
+        # --- 3. Retirement: Update the original parent contract ---
+        original_contract.child_contract_ids = new_contract_ids
+        self.update_contract_status(original_contract_id, ContractStatus.SPLIT)
+        
+        return new_contract_ids
 
     def process_deposit_call(self, contract_id: int, contract_to_call: Contract, amount_to_call: float):
         """
@@ -197,15 +281,13 @@ class SugarscapeG1mt(mesa.Model):
         creditor = self.get_agent_by_id(contract_to_call.creditor_id)
         debtor = self.get_agent_by_id(contract_to_call.debtor_id)
 
-        # Ensure both parties are still in the simulation
         if not creditor or not debtor:
             return
 
-        # Sanity checks
         if amount_to_call <= 0:
             return
         if amount_to_call > contract_to_call.current_principal:
-            amount_to_call = contract_to_call.current_principal # Failsafe
+            amount_to_call = contract_to_call.current_principal
 
         payment = min(amount_to_call, debtor.sugar)
         
@@ -214,8 +296,6 @@ class SugarscapeG1mt(mesa.Model):
         contract_to_call.current_principal -= payment
 
         if payment < amount_to_call:
-            # Debtor defaulted on the call, but we record the partial payment.
-            # A future bankruptcy epic would handle the remaining claim.
             pass
 
         if contract_to_call.current_principal <= 0:
@@ -226,7 +306,6 @@ class SugarscapeG1mt(mesa.Model):
         serializable_ledger = {}
         for contract_id, contract_obj in self.contracts_by_id.items():
             contract_dict = asdict(contract_obj)
-            # Convert enums to strings for JSON compatibility
             contract_dict['contract_type'] = contract_dict['contract_type'].name
             contract_dict['status'] = contract_dict['status'].name
             serializable_ledger[contract_id] = contract_dict

@@ -111,6 +111,16 @@ class SimulatedAgent:
         # Must be a deep copy so changes don't affect the real agent's dictionary
         self._capabilities = copy.deepcopy(real_agent._capabilities_DO_NOT_TOUCH)
 
+        # --- New Simulated Portfolio ---
+        # A deep copy of the agent's financial assets for isolated simulation.
+        self.sim_portfolio = {} # {contract_id: contract_object_copy}
+        owned_contract_ids = self.real_agent.model.contracts_by_agent.get(self.real_agent.unique_id, set())
+        for cid in owned_contract_ids:
+            c = self.real_agent.model.contracts_by_id.get(cid)
+            # We only care about assets the agent owns and can transfer
+            if c and c.status == ContractStatus.ACTIVE and c.is_transferable and c.creditor_id == self.real_agent.unique_id:
+                self.sim_portfolio[cid] = copy.deepcopy(c)
+
     def get_capability(self, key):
         return self._capabilities.get(key)
     
