@@ -16,6 +16,7 @@ class ContractStatus(Enum):
     REPAID = auto()
     DEFAULTED = auto()
     CLOSED = auto()
+    SPLIT = auto()
 
 @dataclass
 class Contract:
@@ -32,11 +33,17 @@ class Contract:
     term_steps: Optional[int] = None
     issue_step: Optional[int] = None
     current_principal: float = 0.0
+    is_transferable: bool = False
+    parent_contract_id: Optional[int] = None
+    child_contract_ids: List[int] = field(default_factory=list)
 
     def __post_init__(self):
         """Initializes stateful fields after the object has been created."""
         if self.current_principal == 0.0 and self.principal > 0.0:
             self.current_principal = self.principal
+        
+        if self.contract_type == ContractType.DEMAND_DEPOSIT:
+            self.is_transferable = True
     
     # --- Convenience Properties ---
     @property
