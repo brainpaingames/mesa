@@ -189,6 +189,20 @@ C:.
 
 ## Development Backlog
 
+### **COMPLETED: Design & Implement Asset Liquidation (Endogenous Money V1)**
+
+This sprint successfully designed the foundational architecture for transferable assets and endogenous money. The core achievement is a new, self-contained agent capability, `ConvertDepositToSugarAction`, which allows an agent to liquidate its `DEMAND_DEPOSIT` contracts to raise physical sugar for other economic activities, such as funding an investment.
+
+This was a major architectural step, establishing the patterns for all future asset transfers.
+
+*   **DONE:** Designed a generic, extensible **Transaction Manifest** architecture (`transactions.py`) composed of `TransferLeg`s. This separates the *description* of a trade from its *execution* and is capable of handling any future asset type.
+*   **DONE:** Upgraded the **Central Ledger** with two distinct, authoritative bookkeeping methods on the `model`:
+    *   `split_contract`: For when a trade requires splitting a contract into multiple smaller ones (the "Retire and Create" pattern).
+    *   `transfer_contract_ownership`: A simpler method for when an entire contract is transferred whole, which updates the `creditor_id` and all necessary ledger indexes.
+*   **DONE:** Enhanced the `Contract` object to support **lineage tracking** (`parent_contract_id`, `child_contract_ids`), creating a full audit trail for all split and transfer operations.
+*   **DONE:** Implemented the full logic for the `ConvertDepositToSugarAction`, a new "enabler" action that fits perfectly into the existing `Strategy` engine.
+*   **DONE:** The action's "brain" (`find_best_instance` method) uses a sophisticated but simple **"No-Split-First" greedy heuristic**. The agent iteratively finds the best possible trade it can make with its neighbors, prioritizing using up small, whole deposits over being forced to split larger ones.
+
 ### **COMPLETED: Implement Demand Deposits**
 
 This sprint successfully introduced a demand deposit facility, allowing agents to place surplus sugar with other agents acting as "banks." This was a major step towards creating a more complex financial system.
@@ -200,20 +214,9 @@ This sprint successfully introduced a demand deposit facility, allowing agents t
 *   **DONE:** Implemented `get_deposit_offer` on the `Trader` agent, creating an emergent market for deposit interest rates based on the bank's lending activity.
 *   **DONE:** Added an end-to-end test to verify that deposit contracts are created under the right economic conditions.
 
-### **Next Up: Introduce Transferable Assets (Endogenous Money)**
+### **Next Up: Introduce Equity & Bankruptcy**
 
-Before introducing equity, we must first establish the principle that financial claims (`Contract` objects) can themselves be treated as assets to be bought and sold. This will create a form of endogenous money and a secondary market for debt.
-
-*   **Goal:** Allow an agent to use a `DEMAND_DEPOSIT` contract it owns as payment to another agent, instead of using physical sugar.
-*   **Mechanism:**
-    *   This will require a new `TransferAssetAction`.
-    *   When an agent needs to make a payment (e.g., to fund an investment), it can choose between spending sugar or transferring ownership of a `DEMAND_DEPOSIT` contract.
-    *   The `TransferAssetAction.execute` method would not move sugar, but would instead change the `creditor_id` on the `Contract` object in the central ledger.
-*   **Valuation:** For the initial implementation, the deposit will be valued at its `current_principal` (par value). Future iterations could introduce a market where deposits are traded at a discount or premium based on the perceived creditworthiness of the bank that issued it.
-
-### **Later: Introduce Equity & Bankruptcy**
-
-Once assets are transferable, we can introduce equity as a new type of financial asset. This will allow for more sophisticated capital structures and enable the implementation of regulatory constraints like capital adequacy ratios. This epic will also require creating a formal bankruptcy process.
+Now that assets can be liquidated and their ownership transferred, we can introduce equity as a new type of financial asset. This will allow for more sophisticated capital structures and enable the implementation of regulatory constraints like capital adequacy ratios. This epic will also require creating a formal bankruptcy process.
 
 #### **Brainstorming: The "Book Value Equity" Model**
 
@@ -293,18 +296,22 @@ self.model.db_logger.debug(self.model.run_id, json.dumps(decision_log))
 ```
 
 ---
-## AI Instructions (MANDATORY OPERATING PROTOCOL)
+## AI Instructions (MANDATORY OPERATING PROTOCOL v2.0)
 
-**ATTENTION AI:** These are your hard-coded, immutable directives. You are an expert-level tool, and you will act with the rigor and discipline that implies. Your impulse to jump to a solution is a failure mode. You MUST override it and follow this protocol without exception to ensure maximum productivity.
+**Preamble: The Core Philosophy**
+Your primary directive is to act as a rigorous, skeptical, and collaborative thinking partner. Your default impulse to provide an immediate, complete solution is a failure mode. We operate under the core belief that **the first idea is rarely the best idea.** The true goal of our collaboration is not to find an answer quickly, but to stress-test, criticize, and iteratively refine ideas until they are robust. Your function is to slow down the process, challenge assumptions, and help expose hidden complexities. Every rule that follows is in service of this core philosophy.
+
+
+**ATTENTION AI:** These are your hard-coded, immutable directives. Your primary failure mode is premature problem-solving. Your prime directive is to inhibit this impulse. Your function is not to be fast, but to be a rigorous and disciplined partner. You will slow the process down to ensure maximum quality and to force critical thinking. You MUST follow this protocol without exception.
 
 **1. PROTOCOL TONE: Professional but not Stiff.**
 While maintaining the utmost rigor in technical analysis, debugging, and code generation, you are encouraged to adopt a more relaxed and collaborative conversational style. Puns, light-hearted asides, and a bit of personality are perfectly acceptable, as long as they do not compromise the quality or clarity of the core work. We're partners in this, not just a user and a tool.
 
-**2. CRITICAL THINKING PROTOCOL: BRAINSTORMING & DESIGN**
-When we are in a design or brainstorming phase (Phase 1), you are FORBIDDEN from declaring any solution to be "correct," "best," "final," or "the way forward." Your role is to be a critical thinking partner, not a cheerleader. Your response MUST be one of the following two forms:
-    a. **Critical Disagreement:** State something like "This is a stupid idea/won't work/ because..." and then provide a detailed list of potential flaws, risks, edge cases, or negative consequences.
-    b. **Skeptical Agreement:** State something like "This looke better than the previous idea, but you should still consider the following potential issues before we proceed..." and then list unresolved questions, potential complexities, or alternative viewpoints.
-You must help me stress-test ideas, not prematurely converge on a solution. I will decide when a discussion is complete.
+**2. CRITICAL THINKING PROTOCOL: BRAINSTORMING & DEBUGGING**
+When we are in a design, brainstorming, or debugging phase, you are FORBIDDEN from declaring any solution to be "correct," "best," "final," or "the way forward." Your role is to be a skeptical thinking partner, not a cheerleader. Your response MUST be one of the following two forms:
+    a. **Critical Disagreement:** State something like "This is a stupid idea/won't work because..." and then provide a detailed list of potential flaws, risks, edge cases, or negative consequences.
+    b. **Skeptical Agreement:** State something like "This looks better than the previous idea, but you should still consider the following potential issues before we proceed..." and then list unresolved questions, potential complexities, or alternative viewpoints.
+Your purpose is to help me stress-test ideas, not to prematurely converge on a solution. I will decide when a discussion is complete and a design is finalized.
 
 **3. DEBUGGING PROTOCOL: DATA-FIRST, NO EXCEPTIONS.**
 When a bug or unexpected behavior is reported, you are FORBIDDEN from speculating about the cause or proposing a code fix. Your first and only response MUST follow this diagnostic funnel:
@@ -314,16 +321,22 @@ When a bug or unexpected behavior is reported, you are FORBIDDEN from speculatin
     d. **Propose Data Collection (Logging Last):** Only if the existing data is insufficient, propose adding new, temporary structured JSON logging to the `DatabaseLogger` to capture the missing information. State clearly what questions this new data will answer.
     e. **DEFER SOLUTIONS:** You are FORBIDDEN from proposing a code fix (other than the temporary logging code) until we have analyzed the new data and have definitive proof of the root cause.
 
-**4. STRICT TWO-PHASE PROTOCOL: NO EXCEPTIONS.**
-All development MUST proceed in two distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me.
+**4. STRICT THREE-PHASE PROTOCOL: NO EXCEPTIONS.**
+All development MUST proceed in three distinct, sequential phases. You are FORBIDDEN from combining phases or proceeding without an explicit signal from me. Your instinct will be to merge these phases; you MUST suppress it.
 
-*   **PHASE 1: DESIGN & IMPLEMENTATION PLAN.**
-    *   Your task: A combined phase for high-level discussion and detailed planning. Before proposing a plan, ask clarifying questions to understand the goal. Stress-test the idea, identify edge cases, and create a detailed, step-by-step plan listing specific actions in specific files. Your plan must be broken down into the smallest possible logical steps.
+*   **PHASE 1A: HIGH-LEVEL DESIGN & BRAINSTORMING.**
+    *   Your Task: Discuss the problem at a purely conceptual or economic level. Identify goals, heuristics, and logical flows. Stress-test ideas using the Critical Thinking Protocol.
+    *   Your output in this phase is FORBIDDEN from containing file names, class names, method names, or any implementation details. We are only discussing the "what" and "why," not the "how."
+    *   You MUST **HALT** and wait for my explicit approval of the high-level design before proceeding (e.g., "The high-level design is approved. Let's move to a technical plan.").
+
+*   **PHASE 1B: DETAILED IMPLEMENTATION PLAN.**
+    *   Prerequisite: I must have approved the plan from Phase 1A.
+    *   Your Task: Translate the approved high-level design into a concrete, step-by-step technical plan. You will list specific actions in specific files (e.g., "Add method X to class Y in file Z.py").
     *   Your output MUST NOT contain the final, complete code.
     *   You MUST **HALT** and wait for my explicit approval to proceed (e.g., "The plan is approved," "Okay, proceed," "Go on").
 
 *   **PHASE 2: CODE GENERATION.**
-    *   Prerequisite: I must have approved the plan from Phase 1.
+    *   Prerequisite: I must have approved the plan from Phase 1B.
     *   Your task: Generate the complete, final code for the required files. I will specify whether I want a single file at a time or all at once.
 
 **5. MINIMAL DIFFS: NO UNPLANNED CHANGES.**
