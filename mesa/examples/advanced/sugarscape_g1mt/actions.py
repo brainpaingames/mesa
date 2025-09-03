@@ -454,7 +454,8 @@ class TakeLoanAction(Action):
         
         # Calculate how much sugar is needed
         survival_cost = opportunity.metabolism_during_investment * (opportunity.duration + 1)
-        shortfall = max(0, survival_cost - agent.sugar)
+        survival_buffer = agent.get_capability("metabolism_sugar")
+        shortfall = max(0, survival_cost - agent.sugar  + survival_buffer)
         amount_needed = shortfall
         if amount_needed <= 0:
             return None
