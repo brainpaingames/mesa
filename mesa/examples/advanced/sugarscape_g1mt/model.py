@@ -12,7 +12,7 @@ import subprocess
 import datetime
 import json
 from .database_logger import DatabaseLogger
-from .investment import InvestmentOpportunity
+# InvestmentOpportunity is no longer imported
 from collections import defaultdict
 from .contracts import Contract, ContractStatus, ContractType
 from dataclasses import asdict
@@ -88,7 +88,7 @@ class SugarscapeG1mt(mesa.Model):
             (self.width, self.height), torus=False, random=self.random
         )
 
-        self.active_investment_portfolio = self._load_investment_portfolio()
+        # The active_investment_portfolio is no longer loaded or used.
 
         # Helper to get a list of new loan contracts for reporters
         def get_new_contracts_by_type(model, contract_type):
@@ -152,7 +152,7 @@ class SugarscapeG1mt(mesa.Model):
             ),
             expected_lifespan=self.agent_expected_lifespan,
             agent_look_ahead_horizon=self.agent_look_ahead_horizon,
-            opportunities=self._create_agent_opportunities(),
+            # The 'opportunities' parameter is removed from this call.
             investments_enabled=self.investments_enabled,
             lending_enabled=self.lending_enabled,
             deposits_enabled=self.deposits_enabled,
@@ -311,38 +311,9 @@ class SugarscapeG1mt(mesa.Model):
             serializable_ledger[contract_id] = contract_dict
         return json.dumps(serializable_ledger, indent=2)
 
-    def _load_investment_portfolio(self):
-        """Loads and builds the active investment portfolio from a JSON file."""
-        try:
-            with open(self.investment_json_path, 'r') as f:
-                all_data = json.load(f)
-        except FileNotFoundError:
-            print(f"Error: Investment JSON file not found at {self.investment_json_path}")
-            return []
-        except json.JSONDecodeError:
-            print(f"Error: Could not decode JSON from {self.investment_json_path}")
-            return []
-
-        definitions = all_data.get("definitions", {})
-        portfolios = all_data.get("portfolios", {})
-
-        portfolio_keys = portfolios.get(self.investment_portfolio_name)
-        if portfolio_keys is None:
-            print(f"Warning: Portfolio '{self.investment_portfolio_name}' not found in {self.investment_json_path}. No investments will be loaded.")
-            return []
-
-        portfolio = []
-        for key in portfolio_keys:
-            if key in definitions:
-                portfolio.append(InvestmentOpportunity(definitions[key], model_context=self))
-            else:
-                print(f"Warning: Investment key '{key}' from portfolio '{self.investment_portfolio_name}' not found in definitions.")
-
-        return portfolio
-
-    def _create_agent_opportunities(self):
-        """Creates a fresh list of investment opportunities for an agent."""
-        return self.active_investment_portfolio.copy()
+    # The _load_investment_portfolio method has been deleted.
+    
+    # The _create_agent_opportunities method has been deleted.
 
     def _add_new_agent(self):
         """Helper method to add a single new agent to the model."""
@@ -370,7 +341,7 @@ class SugarscapeG1mt(mesa.Model):
             ),
             expected_lifespan=self.agent_expected_lifespan,
             agent_look_ahead_horizon=self.agent_look_ahead_horizon,
-            opportunities=self._create_agent_opportunities(),
+            # The 'opportunities' parameter is removed from this call as well.
             investments_enabled=self.investments_enabled,
             lending_enabled=self.lending_enabled,
             deposits_enabled=self.deposits_enabled,

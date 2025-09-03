@@ -5,10 +5,9 @@ import json
 import inspect
 from mesa.discrete_space import CellAgent
 from .contracts import Contract, ContractType, ContractStatus
-from .investment import SimulatedAgent
 from .database_logger import DatabaseLogger
 from .utils import get_distance
-from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, CallDepositAction
+from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, CallDepositAction, SimulatedAgent
 from .strategies import Strategy
 
 
@@ -17,11 +16,11 @@ class Trader(CellAgent):
     A trader agent that can choose between foraging and investing.
     - Has a metabolism of sugar.
     - Harvests sugar to survive.
-    - Can invest sugar to permanently reduce metabolism.
+    - Can invest sugar to permanently increase harvesting power.
     - Can lend, borrow, and accept deposits.
     """
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, deposits_enabled=True, deposit_buffer_horizon=5, lender_vision=7, lender_look_ahead_horizon=20, spoilage_rate=0.0):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, investments_enabled=True, lending_enabled=True, deposits_enabled=True, deposit_buffer_horizon=5, lender_vision=7, lender_look_ahead_horizon=20, spoilage_rate=0.0):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
@@ -34,15 +33,18 @@ class Trader(CellAgent):
         self._capabilities_DO_NOT_TOUCH = {
             "vision": int(vision),
             "metabolism_sugar": float(metabolism_sugar),
-            "harvest_multipliers": [0.0, 1.0, 1.0, 1.0, 1.0],
             "agent_look_ahead_horizon": int(agent_look_ahead_horizon)
         }
         self.investments_enabled = investments_enabled
         self.lending_enabled = lending_enabled
         self.deposits_enabled = deposits_enabled
         self.deposit_buffer_horizon = int(deposit_buffer_horizon)
-        self.available_opportunities = opportunities.copy() if opportunities is not None else []
-        self.completed_investment_names = set()
+        
+        # --- New and Removed Attributes as per the plan ---
+        self.harvest_investment_level = 0
+        # self.available_opportunities and self.completed_investment_names are removed.
+        # The old "harvest_multipliers" capability is also obsolete.
+
         self.is_investing = False
         self.investment_counter = 0
         self.current_investment = None
@@ -76,7 +78,6 @@ class Trader(CellAgent):
                         self.model.update_contract_status(contract_id, ContractStatus.DEFAULTED)
                     else:
                         self.model.update_contract_status(contract_id, ContractStatus.REPAID)
-
 
     def get_lending_offer(self, draft_contract: Contract, borrower_reservation_amount: float) -> float | None:
         """
@@ -204,7 +205,8 @@ class Trader(CellAgent):
             "expected_lifespan": float(self.expected_lifespan),
             "is_investing": int(self.is_investing),
             "agent_look_ahead_horizon": int(self.get_capability("agent_look_ahead_horizon")),
-            "completed_investments": json.dumps(list(self.completed_investment_names)),
+            # "completed_investments" is removed and replaced with the new level
+            "harvest_investment_level": int(self.harvest_investment_level),
         }
 
     def calculate_welfare(self, sugar):
@@ -220,11 +222,18 @@ class Trader(CellAgent):
         """
         return self.sugar <= 0
 
+    def get_current_harvest_multiplier(self) -> float:
+        """Calculates the harvest multiplier based on the agent's investment level."""
+        # Hard-coded reward bonus per level.
+        REWARD_BONUS_PER_LEVEL = 0.5
+        return 1.0 + (REWARD_BONUS_PER_LEVEL * self.harvest_investment_level)
+
     def get_potential_harvest(self, cell):
         """Calculates the potential sugar harvest from a given cell based on current capabilities."""
-        multipliers = self.get_capability("harvest_multipliers")
-        capacity = int(self.model.sugar_distribution[cell.coordinate[0], cell.coordinate[1]])
-        return cell.sugar * multipliers[capacity]
+        # The old `harvest_multipliers` capability is replaced by the new dynamic method.
+        multiplier = self.get_current_harvest_multiplier()
+        # The logic based on capacity has been simplified to a direct multiplier.
+        return cell.sugar * multiplier
 
     def find_best_foraging_cell(self):
         """Finds the best cell to forage from in the agent's vision, including its current cell."""
@@ -285,12 +294,14 @@ class Trader(CellAgent):
     def _process_active_investment(self):
         """
         Handles the logic for a step where the agent is busy investing.
-        This involves decrementing the counter and applying the reward on completion.
+        This involves decrementing the counter. The reward is now handled by
+        the InvestAction's execute method.
         """
         self.investment_counter -= 1
         if self.investment_counter <= 0:
-            self.current_investment.apply_reward_to(self)
-            self.completed_investment_names.add(self.current_investment.name)
+            # The logic for applying the reward is removed from here.
+            # The agent's harvest_investment_level was already updated when the
+            # InvestAction was executed.
             self.is_investing = False
             self.current_investment = None
 
@@ -314,14 +325,14 @@ class Trader(CellAgent):
         
         candidate_strategies = [forage_strategy]
 
-        # 3. Generate and evaluate investment strategies if enabled
+        # 3. Generate and evaluate the single, dynamic investment strategy if enabled
         if self.investments_enabled:
-            for opp in self.available_opportunities:
-                if opp.is_available(self):
-                    # Pass the assembled tool-kit to each investment strategy
-                    invest_strategy = Strategy(InvestAction(self, opp), pre_action_kit, post_action_kit)
-                    invest_strategy.evaluate(self, baseline_utility=baseline_utility)
-                    candidate_strategies.append(invest_strategy)
+            next_level = self.harvest_investment_level + 1
+            invest_action = InvestAction(self, target_level=next_level)
+            
+            invest_strategy = Strategy(invest_action, pre_action_kit, post_action_kit)
+            invest_strategy.evaluate(self, baseline_utility=baseline_utility)
+            candidate_strategies.append(invest_strategy)
 
         if not candidate_strategies:
             return []

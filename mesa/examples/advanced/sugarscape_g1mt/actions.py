@@ -8,12 +8,84 @@ from typing import TYPE_CHECKING, List, Type, Tuple
 import copy
 
 from .contracts import Contract, ContractType, ContractStatus
-from .investment import SimulatedAgent
+# The InvestmentOpportunity class is no longer needed
 from .transactions import AssetType, TransferLeg, TransactionManifest
 
 if TYPE_CHECKING:
     from .agents import Trader
-    from .investment import InvestmentOpportunity
+    # from .investment import InvestmentOpportunity # No longer exists
+
+# --- The SimulatedAgent class is now located in this file ---
+class SimulatedAgent:
+    """
+    A lightweight, temporary agent for 'what-if' scenarios in utility calculations.
+    It mimics a real agent's state and capabilities but avoids deep object copies.
+    """
+    def __init__(self, real_agent):
+        self.real_agent = real_agent
+        self.sugar = real_agent.sugar
+        # Must be a deep copy so changes don't affect the real agent's dictionary
+        self._capabilities = copy.deepcopy(real_agent._capabilities_DO_NOT_TOUCH)
+
+        # --- New attribute to support dynamic investment simulation ---
+        self.harvest_investment_level = real_agent.harvest_investment_level
+
+        # --- New Simulated Portfolio ---
+        # A deep copy of the agent's financial assets for isolated simulation.
+        self.sim_portfolio = {} # {contract_id: contract_object_copy}
+        owned_contract_ids = self.real_agent.model.contracts_by_agent.get(self.real_agent.unique_id, set())
+        for cid in owned_contract_ids:
+            c = self.real_agent.model.contracts_by_id.get(cid)
+            # We only care about assets the agent owns and can transfer
+            if c and c.status == ContractStatus.ACTIVE and c.is_transferable and c.creditor_id == self.real_agent.unique_id:
+                self.sim_portfolio[cid] = copy.deepcopy(c)
+
+    def get_capability(self, key):
+        return self._capabilities.get(key)
+    
+    def set_capability(self, key, value):
+        self._capabilities[key] = value
+
+    def get_current_harvest_multiplier(self) -> float:
+        """Calculates harvest multiplier based on the simulated agent's investment level."""
+        # This logic must mirror the real agent's helper method.
+        # Hard-coded reward bonus per level.
+        return 1.0 + (0.5 * self.harvest_investment_level)
+
+    def get_max_potential_harvest(self):
+        """
+        A simplified version of the real agent's perception, operating on the
+        real agent's model and cell but using the simulated agent's capabilities.
+        """
+        vision = self.get_capability('vision')
+        
+        # This perception logic must mirror the real agent's find_best_foraging_cell
+        neighboring_cells = [
+            cell for cell in self.real_agent.cell.get_neighborhood(vision, include_center=True)
+            if cell.is_empty or cell == self.real_agent.cell
+        ]
+        
+        if not neighboring_cells:
+            return 0
+
+        max_harvest = 0
+        for cell in neighboring_cells:
+            harvest = self.get_potential_harvest(cell)
+            if harvest > max_harvest:
+                max_harvest = harvest
+        
+        return max_harvest
+
+    def get_potential_harvest(self, cell):
+        """Calculates harvest based on simulated capabilities."""
+        # The old `harvest_multipliers` capability is replaced by a dynamic calculation.
+        multiplier = self.get_current_harvest_multiplier()
+        # Accesses the real model's static sugar distribution map
+        capacity = int(self.real_agent.model.sugar_distribution[cell.coordinate[1], cell.coordinate[0]])
+        # Assuming a simple multiplier for now, not dependent on capacity.
+        # This might need to be adjusted if the old capacity-based logic is still desired.
+        return cell.sugar * multiplier
+
 
 class Action(ABC):
     """
@@ -91,22 +163,112 @@ class ForageAction(Action):
 
 
 class InvestAction(Action):
-    """An action for committing to an investment."""
-    def __init__(self, agent: Trader, opportunity: InvestmentOpportunity):
+    """An action for committing to a dynamic, level-based investment."""
+    def __init__(self, agent: Trader, target_level: int):
         super().__init__(agent)
-        self.opportunity = opportunity
+        self.target_level = target_level
 
+        # --- Hard-coded investment parameters (as per plan) ---
+        DURATION_BASE = 3
+        DURATION_INCREMENT = 1
+        METABOLISM_BASE = 3.0
+        METABOLISM_INCREMENT = 0.5
+        
+        self.duration = DURATION_BASE + (DURATION_INCREMENT * (target_level - 1))
+        self.metabolism_during_investment = METABOLISM_BASE + (METABOLISM_INCREMENT * (target_level - 1))
+
+        # The `cost` dictionary is used by other parts of the system (e.g., TakeLoanAction)
+        self.cost = {
+            "duration": self.duration,
+            "metabolism_during_investment": self.metabolism_during_investment
+        }
+    
     def get_enabler_action_types(self) -> List[Type[Action]]:
         """An investment can be enabled by taking a loan or converting assets."""
         return [TakeLoanAction, ConvertDepositToSugarAction]
 
+    def _calculate_utility_core(self, agent: Trader, horizon: int, hypothetical_loan=None, starting_sim_agent=None) -> tuple[float, bool]:
+        """
+        Internal forecasting engine, formerly the logic of InvestmentOpportunity.calculate_utility.
+        Calculates the forecasted utility (final sugar) of undertaking this investment.
+        Returns a tuple of (utility, is_death).
+        """
+        # Determine the starting state for the simulation
+        if starting_sim_agent:
+            sim_agent = starting_sim_agent
+        elif isinstance(agent, SimulatedAgent):
+            sim_agent = agent
+        else:
+            sim_agent = SimulatedAgent(agent)
+        
+        # If a hypothetical loan is passed for a "what-if" scenario, add its principal
+        if hypothetical_loan:
+            sim_agent.sugar += hypothetical_loan.principal
+
+        # Get the agent's current contracts for the simulation
+        agent_contract_ids = sim_agent.real_agent.model.contracts_by_agent.get(sim_agent.real_agent.unique_id, set())
+        agent_contracts = [sim_agent.real_agent.model.contracts_by_id[cid] for cid in agent_contract_ids if sim_agent.real_agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
+
+        # Also include the hypothetical loan in the contract list for cash flow projection
+        if hypothetical_loan:
+            agent_contracts.append(hypothetical_loan)
+
+        # 1. Simulate survival during the investment period
+        cost_duration = self.duration
+        # The agent must survive the investment period AND the step it completes
+        metabolism_cost_steps = cost_duration + 1
+        
+        for i in range(metabolism_cost_steps):
+            current_sim_step = sim_agent.real_agent.model.steps + 1 + i
+            # --- Ledger-Aware Cash Flow Projection ---
+            for contract in agent_contracts:
+                if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
+                    if contract.creditor_id == sim_agent.real_agent.unique_id:
+                        sim_agent.sugar += contract.total_repayment_amount
+                    elif contract.debtor_id == sim_agent.real_agent.unique_id:
+                        sim_agent.sugar -= contract.total_repayment_amount
+            # --- End Ledger-Aware ---
+
+            sim_agent.sugar *= (1 - sim_agent.real_agent.spoilage_rate) # Sugar spoils
+            sim_agent.sugar -= self.metabolism_during_investment
+            if sim_agent.sugar <= 0:
+                return -1, True # Agent dies during investment
+        
+        # 2. Apply the reward and forecast the rest of the horizon
+        # The "reward" is the new investment level for the simulated agent
+        sim_agent.harvest_investment_level = self.target_level
+        
+        remaining_horizon = horizon - metabolism_cost_steps
+        if remaining_horizon > 0:
+            expected_harvest = sim_agent.get_max_potential_harvest()
+            metabolism = sim_agent.get_capability("metabolism_sugar")
+            
+            for i in range(remaining_horizon):
+                current_sim_step = sim_agent.real_agent.model.steps + 1 + metabolism_cost_steps + i
+                # --- Ledger-Aware Cash Flow Projection ---
+                for contract in agent_contracts:
+                    if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
+                        if contract.creditor_id == sim_agent.real_agent.unique_id:
+                            sim_agent.sugar += contract.total_repayment_amount
+                        elif contract.debtor_id == sim_agent.real_agent.unique_id:
+                            sim_agent.sugar -= contract.total_repayment_amount
+                # --- End Ledger-Aware ---
+
+                sim_agent.sugar += expected_harvest
+                sim_agent.sugar *= (1 - sim_agent.real_agent.spoilage_rate) # Sugar spoils
+                sim_agent.sugar -= metabolism
+                if sim_agent.sugar <= 0:
+                    return -1, True # Dies after investing, but before horizon ends
+        
+        return sim_agent.sugar, False
+
     def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
         """
         Simulates the entire lifecycle of an investment to determine its
-        long-term utility.
+        long-term utility by calling the internal forecasting engine.
         """
         horizon = self.agent.get_capability("agent_look_ahead_horizon")
-        final_sugar, is_death = self.opportunity.calculate_utility(self.agent, horizon, starting_sim_agent=sim_agent)
+        final_sugar, is_death = self._calculate_utility_core(self.agent, horizon, starting_sim_agent=sim_agent)
 
         if is_death:
             return -math.inf, sim_agent
@@ -120,17 +282,18 @@ class InvestAction(Action):
         This is used by the Strategy class to evaluate loan-funded scenarios.
         """
         horizon = agent.get_capability("agent_look_ahead_horizon")
-        # Pass the hypothetical loan down to the opportunity's calculator, which knows how to handle it.
-        return self.opportunity.calculate_utility(agent, horizon, hypothetical_loan=hypothetical_loan)
+        # Pass the hypothetical loan down to the core calculator.
+        return self._calculate_utility_core(agent, horizon, hypothetical_loan=hypothetical_loan)
 
     def execute(self):
         """Sets the agent's state to 'investing'."""
         self.agent.is_investing = True
-        self.agent.current_investment = self.opportunity
-        self.agent.investment_counter = self.opportunity.cost["duration"]
-        self.agent.set_capability("metabolism_sugar", self.opportunity.cost["metabolism_during_investment"])
-        if self.opportunity in self.agent.available_opportunities:
-             self.agent.available_opportunities.remove(self.opportunity)
+        self.agent.current_investment = self
+        self.agent.investment_counter = self.duration
+        self.agent.set_capability("metabolism_sugar", self.metabolism_during_investment)
+        # The reward is applied upon completion of the investment, but for state tracking,
+        # we update the agent's level now.
+        self.agent.harvest_investment_level = self.target_level
 
 
 class MakeDepositAction(Action):
@@ -286,16 +449,17 @@ class TakeLoanAction(Action):
         """
         Contains all logic for discovering and negotiating a loan.
         """
-        opportunity = core_action_to_enable.opportunity
+        # Now that logic is merged, core_action_to_enable is the InvestAction instance itself.
+        opportunity = core_action_to_enable
         
         # Calculate how much sugar is needed
-        survival_cost = opportunity.cost["metabolism_during_investment"] * (opportunity.cost["duration"] + 1)
+        survival_cost = opportunity.metabolism_during_investment * (opportunity.duration + 1)
         shortfall = max(0, survival_cost - agent.sugar)
         amount_needed = shortfall
         if amount_needed <= 0:
             return None
         
-        term = opportunity.cost["duration"] + 10
+        term = opportunity.duration + 10
         
         # 1. Simulate a zero-interest loan to find the best-case utility
         draft_contract = Contract(contract_type=ContractType.TERM_LOAN, creditor_id=-1, debtor_id=agent.unique_id, principal=amount_needed, interest_schedule=[0], term_steps=term)
@@ -351,7 +515,7 @@ class TakeLoanAction(Action):
 
 class ConvertDepositToSugarAction(Action):
     """
-    A self-contained action for liquidating deposits to generate sugar.
+A self-contained action for liquidating deposits to generate sugar.
     Its planner uses the "No-Split-First" greedy heuristic.
     """
     def __init__(self, agent: Trader, manifest: TransactionManifest, sugar_to_generate: float):
@@ -366,8 +530,8 @@ class ConvertDepositToSugarAction(Action):
         if not isinstance(core_action_to_enable, InvestAction):
             return None
         
-        opportunity = core_action_to_enable.opportunity
-        cost_of_survival = opportunity.cost["metabolism_during_investment"] * (opportunity.cost["duration"] + 1)
+        opportunity = core_action_to_enable
+        cost_of_survival = opportunity.metabolism_during_investment * (opportunity.duration + 1)
         shortfall = max(0, cost_of_survival - agent.sugar)
 
         if shortfall <= 0:

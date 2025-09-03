@@ -35,7 +35,7 @@ $run1_start = Get-Date
 python -m sugarscape_g1mt.run_batch --run_group "baseline" `
     --total_steps 500 `
     --replications 1 `
-    --initial_population "[100,200,300,400]" `
+    --initial_population "[100,200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
@@ -59,7 +59,7 @@ $run2_start = Get-Date
 python -m sugarscape_g1mt.run_batch --run_group "baseline_investments" `
     --total_steps 500 `
     --replications 1 `
-    --initial_population "[100,200,300,400]" `
+    --initial_population "[100,200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
@@ -83,7 +83,7 @@ $run3_start = Get-Date
 python -m sugarscape_g1mt.run_batch --run_group "baseline_lending" `
     --total_steps 500 `
     --replications 1 `
-    --initial_population "[100,200,300,400]" `
+    --initial_population "[100,200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
@@ -107,7 +107,7 @@ $run4_start = Get-Date
 python -m sugarscape_g1mt.run_batch --run_group "baseline_deposits" `
     --total_steps 500 `
     --replications 1 `
-    --initial_population "[100]" `
+    --initial_population "[100,200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
