@@ -104,6 +104,7 @@ class SugarscapeG1mt(mesa.Model):
                 "Total Sugar": lambda m: sum(a.sugar for a in m.agents),
                 "Investing Agents": lambda m: len([a for a in m.agents if a.is_investing]),
                 "Average Metabolism": lambda m: np.mean([a.get_capability('metabolism_sugar') for a in m.agents]) if m.agents else 0,
+                "Harvested Sugar": lambda m: sum(a.sugar_harvested_this_step for a in m.agents), # Add this line
                 "Gini": Gini,
                 "Deaths": lambda m: getattr(m, 'deaths_this_step', 0),
                 "Active Loan Count": lambda m: sum(1 for c in m.contracts_by_id.values() if c.status == ContractStatus.ACTIVE and c.contract_type == ContractType.TERM_LOAN),

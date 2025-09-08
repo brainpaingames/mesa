@@ -65,7 +65,7 @@ def main(args):
 
     available_reporters = [col for col in run_data.columns if col not in ['run_id', 'step', 'display']]
     
-    default_reporters = [rep for rep in ["#Traders", "Gini"] if rep in available_reporters]
+    default_reporters = [rep for rep in ["Harvested Sugar", "Gini"] if rep in available_reporters]
 
     selected_reporters = st.sidebar.multiselect(
         "Select Reporters to Plot:",

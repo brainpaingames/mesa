@@ -29,12 +29,14 @@ class Trader(CellAgent):
         self.max_age = int(max_age)
         self.expected_lifespan = float(expected_lifespan)
         self.age = 0
+        self.sugar_harvested_this_step = 0.0
 
         self._capabilities_DO_NOT_TOUCH = {
             "vision": int(vision),
             "metabolism_sugar": float(metabolism_sugar),
             "agent_look_ahead_horizon": int(agent_look_ahead_horizon)
         }
+        self.base_metabolism = float(metabolism_sugar)
         self.investments_enabled = investments_enabled
         self.lending_enabled = lending_enabled
         self.deposits_enabled = deposits_enabled
@@ -405,8 +407,10 @@ class Trader(CellAgent):
         """
         Agent harvests sugar from its current cell.
         """
-        self.sugar += self.get_potential_harvest(self.cell)
+        harvest_amount = self.get_potential_harvest(self.cell)
+        self.sugar += harvest_amount
         self.cell.sugar = 0
+        self.sugar_harvested_this_step = harvest_amount
 
     def apply_spoilage(self):
         """Applies percentage-based spoilage to the agent's sugar."""
@@ -442,6 +446,7 @@ class Trader(CellAgent):
             # InvestAction was executed.
             self.is_investing = False
             self.current_investment = None
+            self.set_capability("metabolism_sugar", self.base_metabolism)
 
     def _find_best_plan(self):
         """
@@ -490,6 +495,7 @@ class Trader(CellAgent):
         sequence of operations: settle contracts, decide and act, and finally
         update biological state.
         """
+        self.sugar_harvested_this_step = 0.0
         self.process_contract_maturities()
 
         if self.is_investing:
