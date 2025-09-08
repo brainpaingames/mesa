@@ -52,6 +52,9 @@ class SugarscapeG1mt(mesa.Model):
         self.db_logger = params.get('db_logger')
         self.run_id = params.get('run_id')
 
+        # Store the investment_params dictionary as a standalone attribute
+        self.investment_params = config.get('investment_params', {})
+
 
         # --- 5. Set all parameters as model attributes ---
         for key, value in params.items():
@@ -159,7 +162,8 @@ class SugarscapeG1mt(mesa.Model):
             deposit_buffer_horizon=self.deposit_buffer_horizon,
             lender_vision=self.lender_vision,
             lender_look_ahead_horizon=self.lender_look_ahead_horizon,
-            spoilage_rate=self.agent_spoilage_rate
+            spoilage_rate=self.agent_spoilage_rate,
+            investment_params=self.investment_params
         )
     
     # --- LAZY-LOADED CACHE GETTER ---
@@ -348,7 +352,8 @@ class SugarscapeG1mt(mesa.Model):
             deposit_buffer_horizon=self.deposit_buffer_horizon,
             lender_vision=self.lender_vision,
             lender_look_ahead_horizon=self.lender_look_ahead_horizon,
-            spoilage_rate=self.agent_spoilage_rate
+            spoilage_rate=self.agent_spoilage_rate,
+            investment_params=self.investment_params
         )
 
     def step(self):

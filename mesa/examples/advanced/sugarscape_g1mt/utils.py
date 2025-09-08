@@ -5,16 +5,7 @@ import math
 import json
 from pathlib import Path
 
-# --- Hard-Coded Economic Parameters for "Constant Payback" Model ---
-INVESTMENT_PARAMS = {
-    "benefit_growth_factor": 1.5,
-    "constant_time_to_save": 20,
-    "investment_duration": 5,
-    "metabolism_during_investment": 3.0,
-    "base_harvest_multiplier": 1.0,
-    "max_sugar_capacity_for_ref_income": 4.0,
-    "metabolism_normal_for_ref_income": 1.0
-}
+
 
 def get_harvest_multiplier(level: int, base_multiplier: float, growth_factor: float) -> float:
     """
@@ -22,6 +13,29 @@ def get_harvest_multiplier(level: int, base_multiplier: float, growth_factor: fl
     This is a pure function.
     """
     return base_multiplier * (growth_factor ** level)
+
+
+def get_metabolism_during_investment(current_level: int, duration: int, constant_k: int, base_multiplier: float, growth_factor: float, reference_sugar: float, reference_metabolism: float) -> float:
+    """
+    Calculates the required metabolism during an investment to ensure a "Constant Time to Save".
+    This is a pure function derived from the economic model's core requirements.
+    """
+    current_multiplier = get_harvest_multiplier(current_level, base_multiplier, growth_factor)
+    
+    ref_gross_income = current_multiplier * reference_sugar
+    ref_net_savings = max(0, ref_gross_income - reference_metabolism)
+    
+    # Formula derived from the design requirements
+    return (constant_k * ref_net_savings) / (duration + 1)
+
+
+def get_capital_requirement(metabolism_during_investment: float, duration: int) -> float:
+    """
+    Calculates the total capital an agent must possess to survive the investment period.
+    This is a pure function.
+    """
+    # The agent must survive the investment period plus the step it completes.
+    return metabolism_during_investment * (duration + 1)
 
 
 def Gini(model):

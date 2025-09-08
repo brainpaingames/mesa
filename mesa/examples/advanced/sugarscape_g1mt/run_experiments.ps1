@@ -27,7 +27,7 @@ $total_start_time = Get-Date
 Clear-Host
 Write-Host ">>> Starting full experiment batch at $total_start_time" -ForegroundColor Green
 Write-Host "-------------------------------------------------------------"
-<#
+
 # --- Experiment 1: Baseline (No Investments, No Lending) ---
 Write-Host "`n[1/4] Running: Baseline Experiment..." -ForegroundColor Cyan
 $run1_start = Get-Date
@@ -35,7 +35,7 @@ $run1_start = Get-Date
 python -m sugarscape_g1mt.run_batch --run_group "baseline" `
     --total_steps 1500 `
     --replications 1 `
-    --initial_population "[200]" `
+    --initial_population "[100,200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
@@ -59,7 +59,7 @@ $run2_start = Get-Date
 python -m sugarscape_g1mt.run_batch --run_group "baseline_investments" `
     --total_steps 1500 `
     --replications 1 `
-    --initial_population "[200]" `
+    --initial_population "[100,200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
@@ -75,15 +75,15 @@ $run2_duration = (Get-Date) - $run2_start
 Write-Host ("`n`t- Investments run finished in {0}" -f $run2_duration.ToString('hh\:mm\:ss')) -ForegroundColor Yellow
 Write-Host "-------------------------------------------------------------"
 
-#>
-# --- Experiment 3: Investments and Lending Enabled ---
+
+<# --- Experiment 3: Investments and Lending Enabled ---
 Write-Host "`n[3/4] Running: Lending-Enabled Experiment..." -ForegroundColor Cyan
 $run3_start = Get-Date
 
 python -m sugarscape_g1mt.run_batch --run_group "baseline_lending" `
     --total_steps 1500 `
     --replications 1 `
-    --initial_population "[200]" `
+    --initial_population "[100,200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
@@ -98,7 +98,7 @@ python -m sugarscape_g1mt.run_batch --run_group "baseline_lending" `
 $run3_duration = (Get-Date) - $run3_start
 Write-Host ("`n`t- Lending run finished in {0}" -f $run3_duration.ToString('hh\:mm\:ss')) -ForegroundColor Yellow
 Write-Host "-------------------------------------------------------------"
-
+#>
 <#
 # --- Experiment 4: Deposits Enabled ---
 Write-Host "`n[4/4] Running: Deposits-Enabled Experiment..." -ForegroundColor Cyan
