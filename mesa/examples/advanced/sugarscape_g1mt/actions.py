@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, List, Type, Tuple
 import copy
 
 from .contracts import Contract, ContractType, ContractStatus
-# The InvestmentOpportunity class is no longer needed
 from .transactions import AssetType, TransferLeg, TransactionManifest
+from .utils import INVESTMENT_PARAMS, get_harvest_multiplier
 
 if TYPE_CHECKING:
     from .agents import Trader
-    # from .investment import InvestmentOpportunity # No longer exists
+
 
 # --- The SimulatedAgent class is now located in this file ---
 class SimulatedAgent:
@@ -49,8 +49,11 @@ class SimulatedAgent:
     def get_current_harvest_multiplier(self) -> float:
         """Calculates harvest multiplier based on the simulated agent's investment level."""
         # This logic must mirror the real agent's helper method.
-        # Hard-coded reward bonus per level.
-        return 1.0 + (0.5 * self.harvest_investment_level)
+        return get_harvest_multiplier(
+            level=self.harvest_investment_level,
+            base_multiplier=INVESTMENT_PARAMS["base_harvest_multiplier"],
+            growth_factor=INVESTMENT_PARAMS["benefit_growth_factor"]
+        )
 
     def get_max_potential_harvest(self):
         """
@@ -81,7 +84,7 @@ class SimulatedAgent:
         # The old `harvest_multipliers` capability is replaced by a dynamic calculation.
         multiplier = self.get_current_harvest_multiplier()
         # Accesses the real model's static sugar distribution map
-        capacity = int(self.real_agent.model.sugar_distribution[cell.coordinate[1], cell.coordinate[0]])
+        # capacity = int(self.real_agent.model.sugar_distribution[cell.coordinate[1], cell.coordinate[0]])
         # Assuming a simple multiplier for now, not dependent on capacity.
         # This might need to be adjusted if the old capacity-based logic is still desired.
         return cell.sugar * multiplier
@@ -147,7 +150,7 @@ class ForageAction(Action):
         if not self.target_cell:
             harvest_amount = 0
         else:
-            harvest_amount = self.agent.get_potential_harvest(self.target_cell)
+            harvest_amount = sim_agent.get_potential_harvest(self.target_cell)
         
         sim_agent.sugar += harvest_amount
 
@@ -168,20 +171,19 @@ class InvestAction(Action):
         super().__init__(agent)
         self.target_level = target_level
 
-        # --- Hard-coded investment parameters (as per plan) ---
-        DURATION_BASE = 3
-        DURATION_INCREMENT = 1
-        METABOLISM_BASE = 3.0
-        METABOLISM_INCREMENT = 0.5
-        
-        self.duration = DURATION_BASE + (DURATION_INCREMENT * (target_level - 1))
-        self.metabolism_during_investment = METABOLISM_BASE + (METABOLISM_INCREMENT * (target_level - 1))
+        params = INVESTMENT_PARAMS
+        self.duration = params["investment_duration"]
+        self.metabolism_during_investment = params["metabolism_during_investment"]
 
-        # The `cost` dictionary is used by other parts of the system (e.g., TakeLoanAction)
-        self.cost = {
-            "duration": self.duration,
-            "metabolism_during_investment": self.metabolism_during_investment
-        }
+        k = params["constant_time_to_save"]
+        max_sugar = params["max_sugar_capacity_for_ref_income"]
+        metabolism_normal = params["metabolism_normal_for_ref_income"]
+        
+        current_multiplier = self.agent.get_current_harvest_multiplier()
+        ref_gross_income = current_multiplier * max_sugar
+        ref_net_savings = max(0, ref_gross_income - metabolism_normal)
+        
+        self.upfront_sugar_cost = k * ref_net_savings
     
     def get_enabler_action_types(self) -> List[Type[Action]]:
         """An investment can be enabled by taking a loan or converting assets."""
@@ -204,6 +206,10 @@ class InvestAction(Action):
         # If a hypothetical loan is passed for a "what-if" scenario, add its principal
         if hypothetical_loan:
             sim_agent.sugar += hypothetical_loan.principal
+
+        sim_agent.sugar -= self.upfront_sugar_cost
+        if sim_agent.sugar < 0:
+            return -1, True # Dies immediately if they can't afford the upfront cost
 
         # Get the agent's current contracts for the simulation
         agent_contract_ids = sim_agent.real_agent.model.contracts_by_agent.get(sim_agent.real_agent.unique_id, set())
@@ -231,6 +237,7 @@ class InvestAction(Action):
 
             sim_agent.sugar *= (1 - sim_agent.real_agent.spoilage_rate) # Sugar spoils
             sim_agent.sugar -= self.metabolism_during_investment
+            
             if sim_agent.sugar <= 0:
                 return -1, True # Agent dies during investment
         
@@ -241,7 +248,7 @@ class InvestAction(Action):
         remaining_horizon = horizon - metabolism_cost_steps
         if remaining_horizon > 0:
             expected_harvest = sim_agent.get_max_potential_harvest()
-            metabolism = sim_agent.get_capability("metabolism_sugar")
+            metabolism_after_investment = sim_agent.get_capability("metabolism_sugar")
             
             for i in range(remaining_horizon):
                 current_sim_step = sim_agent.real_agent.model.steps + 1 + metabolism_cost_steps + i
@@ -256,7 +263,7 @@ class InvestAction(Action):
 
                 sim_agent.sugar += expected_harvest
                 sim_agent.sugar *= (1 - sim_agent.real_agent.spoilage_rate) # Sugar spoils
-                sim_agent.sugar -= metabolism
+                sim_agent.sugar -= metabolism_after_investment
                 if sim_agent.sugar <= 0:
                     return -1, True # Dies after investing, but before horizon ends
         
@@ -287,6 +294,8 @@ class InvestAction(Action):
 
     def execute(self):
         """Sets the agent's state to 'investing'."""
+        self.agent.sugar -= self.upfront_sugar_cost
+
         self.agent.is_investing = True
         self.agent.current_investment = self
         self.agent.investment_counter = self.duration
@@ -453,9 +462,8 @@ class TakeLoanAction(Action):
         opportunity = core_action_to_enable
         
         # Calculate how much sugar is needed
-        survival_cost = opportunity.metabolism_during_investment * (opportunity.duration + 1)
         survival_buffer = agent.get_capability("metabolism_sugar")
-        shortfall = max(0, survival_cost - agent.sugar  + survival_buffer)
+        shortfall = max(0, opportunity.upfront_sugar_cost - agent.sugar + survival_buffer)
         amount_needed = shortfall
         if amount_needed <= 0:
             return None
@@ -532,8 +540,7 @@ A self-contained action for liquidating deposits to generate sugar.
             return None
         
         opportunity = core_action_to_enable
-        cost_of_survival = opportunity.metabolism_during_investment * (opportunity.duration + 1)
-        shortfall = max(0, cost_of_survival - agent.sugar)
+        shortfall = max(0, opportunity.upfront_sugar_cost - agent.sugar)
 
         if shortfall <= 0:
             return None

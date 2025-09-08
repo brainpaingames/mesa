@@ -1,3 +1,13 @@
+Of course. I have made the following edits to the README file:
+1.  **Removed Obsolete Sections:** I have completely removed the old `### Dynamic Investments` section, as it described the now-deleted `investments.json` system.
+2.  **Updated Project Structure:** I have removed `investments.json` and `investment.py` from the file tree diagram.
+3.  **Added New Section:** I have added a new `### Dynamic, Level-Based Investments` section to accurately describe the new "Constant Payback" model.
+4.  **Updated Development Backlog:** I have created a new `IN PROGRESS` section detailing the entire diagnostic and design journey we just completed for the new investment model. It serves as a record of the work and clearly states the immediate next steps.
+
+Here is the complete, updated `Readme.md` file.
+
+---
+
 # Sugarscape with an Investment and Lending Mechanic
 
 ## Summary
@@ -27,11 +37,12 @@ The agent's "brain" has been refactored into a formal, object-oriented architect
 -   **The `Strategy` Class:** This is a generic "thinking engine." It is initialized with a "core action" (a goal) and a "tool-kit" of available action types. Its `evaluate()` method then runs a simulation to find the optimal sequence of actions—including pre-actions from its tool-kit—to best achieve the goal. It is a generic planner that knows nothing specific about loans or deposits, only how to combine actions and compare outcomes.
 -   **The `Trader` Agent:** The agent itself is now a high-level orchestrator. Its `_find_best_plan()` method assembles the tool-kit of available actions based on simulation flags (e.g., `lending_enabled`), generates a list of candidate `Strategy` objects, and then runs a "tournament" to find the one with the highest utility. It then executes the winning strategy's action plan.
 
-### Dynamic Investments
+### Dynamic, Level-Based Investments
 
-The investment system is designed to be flexible and extensible. All investment opportunities and portfolios are defined in `investments.json`. This file has two main sections:
-1.  **`definitions`**: An object where every possible investment is defined exactly once with a unique key. This adheres to the DRY (Don't Repeat Yourself) principle.
-2.  **`portfolios`**: An object where each portfolio is a named list of keys that reference the investments in the `definitions` section. The model can be configured at runtime to provide agents with a specific portfolio.
+The investment system has been refactored away from a static list of choices to a single, dynamic, and infinitely progressing "Harvesting Technology" track.
+-   **Agent State:** Each agent tracks its progress via a `harvest_investment_level` attribute.
+-   **Dynamic Calculation:** The costs and benefits of investing to the *next* level are not stored in a file but are calculated on-the-fly by a set of core economic functions designed to create a stable, long-term growth trajectory.
+-   **Capital Requirement Model:** The "cost" of an investment is not an upfront payment, but a **capital requirement** an agent must possess to begin investing. This requirement is the total metabolic drain during the fixed-duration investment period. The `metabolism_during_investment` for each level is dynamically derived from the benefit function to ensure the core economic model remains stable and profitable at all levels.
 
 ### Peer-to-Peer Lending & Central Ledger
 
@@ -162,8 +173,6 @@ C:.
 │   database_logger.py      # Class for logging all data to SQLite
 │
 │   config.json             # Central configuration for all default parameters
-│   investments.json        # External definitions for all investment opportunities
-│   investment.py           # Defines the InvestmentOpportunity & SimulatedAgent classes
 │   contracts.py            # Defines the Contract data object
 │   actions.py              # NEW: Defines concrete Action classes
 │   strategies.py           # NEW: Defines the generic Strategy engine
@@ -237,6 +246,36 @@ When an agent fails, a formal bankruptcy proceeding must occur to handle its out
     2.  **Lenders (debt holders)** are paid next, if any sugar remains.
     3.  **Equity Holders** are paid last.
 *   **The Equity Wipeout:** In almost all cases, the shareholders get nothing. Their `EQUITY_SHARE` contracts are deleted, and they realize a total loss on their investment. This makes equity the riskiest asset class, as it should be.
+
+
+*   **DONE:** Added `DEMAND_DEPOSIT` contract type.
+*   **DONE:** Upgraded the `Strategy` engine to evaluate and append "post-actions."
+*   **DONE:** Implemented `MakeDepositAction` and `CallDepositAction`.
+*   **DONE:** Implemented `get_deposit_offer` on the `Trader` agent.
+
+### **IN PROGRESS: Major Refactor of Investment Economics**
+This work addresses a fundamental flaw discovered in the previous investment model, which led to an economic "bust" where all investment activity ceased in the late game.
+
+*   **Problem Diagnosis:** Through detailed logging and analysis, we discovered that previous investment models were fundamentally unstable. Models with an **unbounded time cost** created a "Shrinking Horizon Problem," making high-level investments appear irrational. Models with simple exponential cost and linear benefit were also proven to be unprofitable within the agent's limited forecast window.
+
+*   **New Design Requirements:** To solve this, we established a new, rigorous set of requirements for the economic "physics":
+    1.  **Constant Time Cost:** The `duration` of all investments is a single, fixed parameter.
+    2.  **Constant "Time to Save":** The time an agent must save to afford the next investment (if on optimal land) must be a constant `K` at all levels.
+    3.  **Constant Relative Return:** The percentage return on investment, as calculated within the agent's forecast, must be constant at all levels.
+    4.  **Profitability Constraint:** All economic parameters must be chosen to satisfy a core constraint to ensure investment is always a rational choice.
+
+*   **The "Constant Payback" Model:** We designed a new economic model to meet these requirements:
+    1.  **Benefit (Harvest Multiplier):** The agent's productivity grows exponentially with its investment level: `Multiplier(L) = base * (growth_factor ^ L)`. This provides a smooth, stable growth trajectory.
+    2.  **Cost (Capital Requirement):** The "cost" is a **capital requirement** an agent must possess to begin investing, equal to the total metabolic drain during the investment. To satisfy the "Constant Time to Save" rule, the `metabolism_during_investment` is dynamically derived from the benefit function: `metabolism(L) = (K * Net_Savings_Potential(L-1)) / (duration + 1)`.
+
+### **Next Up: Implement the "Constant Payback" Model**
+
+The immediate next task is to implement the new economic design. This involves:
+1.  **Centralize Physics in `utils.py`:** Create a pure function for `get_harvest_multiplier` and new functions for `get_metabolism_during_investment` and `get_capital_requirement`. Centralize the new economic parameters in a hard-coded dictionary in this file.
+2.  **Refactor `agents.py`:** Update the `Trader.get_current_harvest_multiplier` method to call the new, centralized utility function.
+3.  **Refactor `actions.py`:**
+    *   Rewrite `InvestAction` to use the new capital requirement model. The concept of an "upfront sugar cost" must be completely removed and replaced with a check that the agent's sugar exceeds the `capital_requirement`.
+    *   Update `TakeLoanAction` and `ConvertDepositToSugarAction` to calculate the `shortfall` based on this new capital requirement.
 
 ### **Long-Term Goals / Epics**
 -   **Systemic Overhaul of Agent Foresight:** The agent's "brain" (the decision simulation) has a critical flaw: it evaluates the utility of financial actions in isolation. A patch was implemented for deposits, but a systemic fix is needed.

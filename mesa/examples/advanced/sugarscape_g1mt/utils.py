@@ -5,6 +5,24 @@ import math
 import json
 from pathlib import Path
 
+# --- Hard-Coded Economic Parameters for "Constant Payback" Model ---
+INVESTMENT_PARAMS = {
+    "benefit_growth_factor": 1.5,
+    "constant_time_to_save": 20,
+    "investment_duration": 5,
+    "metabolism_during_investment": 3.0,
+    "base_harvest_multiplier": 1.0,
+    "max_sugar_capacity_for_ref_income": 4.0,
+    "metabolism_normal_for_ref_income": 1.0
+}
+
+def get_harvest_multiplier(level: int, base_multiplier: float, growth_factor: float) -> float:
+    """
+    Calculates the harvest multiplier for a given investment level.
+    This is a pure function.
+    """
+    return base_multiplier * (growth_factor ** level)
+
 
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""

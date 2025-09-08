@@ -6,7 +6,7 @@ import inspect
 from mesa.discrete_space import CellAgent
 from .contracts import Contract, ContractType, ContractStatus
 from .database_logger import DatabaseLogger
-from .utils import get_distance
+from .utils import get_distance, get_harvest_multiplier, INVESTMENT_PARAMS
 from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, CallDepositAction, SimulatedAgent
 from .strategies import Strategy
 
@@ -224,9 +224,11 @@ class Trader(CellAgent):
 
     def get_current_harvest_multiplier(self) -> float:
         """Calculates the harvest multiplier based on the agent's investment level."""
-        # Hard-coded reward bonus per level.
-        REWARD_BONUS_PER_LEVEL = 0.5
-        return 1.0 + (REWARD_BONUS_PER_LEVEL * self.harvest_investment_level)
+        return get_harvest_multiplier(
+            level=self.harvest_investment_level,
+            base_multiplier=INVESTMENT_PARAMS["base_harvest_multiplier"],
+            growth_factor=INVESTMENT_PARAMS["benefit_growth_factor"]
+        )
 
     def get_potential_harvest(self, cell):
         """Calculates the potential sugar harvest from a given cell based on current capabilities."""
@@ -342,7 +344,7 @@ class Trader(CellAgent):
 
         # Return the winning plan (a list of Action objects)
         return best_strategy.get_action_plan()
-
+    
     def step(self):
         """
         The main entry point for the agent's turn. It follows a strict
