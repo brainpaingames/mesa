@@ -1,12 +1,3 @@
-Of course. I have made the following edits to the README file:
-1.  **Removed Obsolete Sections:** I have completely removed the old `### Dynamic Investments` section, as it described the now-deleted `investments.json` system.
-2.  **Updated Project Structure:** I have removed `investments.json` and `investment.py` from the file tree diagram.
-3.  **Added New Section:** I have added a new `### Dynamic, Level-Based Investments` section to accurately describe the new "Constant Payback" model.
-4.  **Updated Development Backlog:** I have created a new `IN PROGRESS` section detailing the entire diagnostic and design journey we just completed for the new investment model. It serves as a record of the work and clearly states the immediate next steps.
-
-Here is the complete, updated `Readme.md` file.
-
----
 
 # Sugarscape with an Investment and Lending Mechanic
 
@@ -39,10 +30,19 @@ The agent's "brain" has been refactored into a formal, object-oriented architect
 
 ### Dynamic, Level-Based Investments
 
-The investment system has been refactored away from a static list of choices to a single, dynamic, and infinitely progressing "Harvesting Technology" track.
--   **Agent State:** Each agent tracks its progress via a `harvest_investment_level` attribute.
--   **Dynamic Calculation:** The costs and benefits of investing to the *next* level are not stored in a file but are calculated on-the-fly by a set of core economic functions designed to create a stable, long-term growth trajectory.
--   **Capital Requirement Model:** The "cost" of an investment is not an upfront payment, but a **capital requirement** an agent must possess to begin investing. This requirement is the total metabolic drain during the fixed-duration investment period. The `metabolism_during_investment` for each level is dynamically derived from the benefit function to ensure the core economic model remains stable and profitable at all levels.
+The investment system has been refactored to a single, dynamic "Harvesting Technology" track. This new model enables long-term, sustainable economic growth.
+-   **Capital Requirement Model:** An investment no longer has an "upfront cost." Instead, an agent must meet a **capital requirement** to begin. This decision is based on the agent's full liquid balance sheet (`sugar + total_deposits`).
+-   **Just-in-Time Liquidation:** Agents do not need to hold the full capital requirement as physical sugar. An agent can begin an investment with a large deposit portfolio and low sugar. During the investment period, if its sugar drops below zero after metabolizing, the agent will attempt to liquidate its deposits to cover the deficit. This creates the possibility for emergent **liquidity crises**, where an agent that is solvent on paper can fail if it cannot find a buyer for its assets.
+-   **Dynamic "Physics":** The costs (`metabolism_during_investment`) and benefits (`harvest_multiplier`) of investing are not static but are calculated on-the-fly by a set of pure functions designed to create a stable, compounding growth trajectory ("Constant Payback" model).
+
+### Unified Asset Liquidation & The "Priority Cascade"
+
+The model now features a sophisticated, unified system for how agents turn their financial assets (demand deposits) into usable sugar. This logic is fully encapsulated within the agent's rational planning `Strategy` engine.
+-   **The `RaiseSugarFromDepositsAction`:** This new "smart action" is the agent's single tool for covering an end-of-turn sugar deficit. Its planner (`find_best_instance` method) is a "factory" that finds the best possible liquidation plan.
+-   **The "Priority Cascade":** The planner follows a strict and economically rational order of operations:
+    1.  **Priority #1: Sell on the Open Market.** The agent first attempts to **sell** its deposit asset to any willing neighbor with surplus sugar. This is the preferred method as it avoids stressing a single "bank."
+    2.  **Priority #2 (Fallback): Withdraw from Issuer.** Only if a market sale is not possible, the agent will fall back to a direct **withdrawal** from the original issuer of the deposit.
+-   **Robust Planning:** This action is capable of creating complex plans, such as withdrawing from multiple smaller deposits in sequence to cover a single large deficit.
 
 ### Peer-to-Peer Lending & Central Ledger
 
@@ -174,8 +174,8 @@ C:.
 │
 │   config.json             # Central configuration for all default parameters
 │   contracts.py            # Defines the Contract data object
-│   actions.py              # NEW: Defines concrete Action classes
-│   strategies.py           # NEW: Defines the generic Strategy engine
+│   actions.py              # Home of the Action classes, incl. the sophisticated RaiseSugarFromDepositsAction
+│   strategies.py           # The generic Strategy engine that plans how to use Actions
 │
 │   dashboard.py            # Main entry point for the Streamlit dashboard
 │   analysis_helpers.py     # Data-querying functions for the dashboard
@@ -193,35 +193,46 @@ C:.
 └───tests
     │   conftest.py         # Pytest configuration for path handling
     │   test_e2e_runs.py
-    │   ...
-```
+    │   ...```
 
 ## Development Backlog
 
-### **COMPLETED: Design & Implement Asset Liquidation (Endogenous Money V1)**
+### **COMPLETED: Implement "Constant Payback" Economics & Rationalize Asset Liquidation**
 
-This sprint successfully designed the foundational architecture for transferable assets and endogenous money. The core achievement is a new, self-contained agent capability, `ConvertDepositToSugarAction`, which allows an agent to liquidate its `DEMAND_DEPOSIT` contracts to raise physical sugar for other economic activities, such as funding an investment.
+This epic successfully addressed a fundamental flaw in the previous investment model and completely re-architected how agents handle financial distress, paving the way for emergent liquidity crises.
 
-This was a major architectural step, establishing the patterns for all future asset transfers.
+*   **Part 1: The New Economic Model.** We successfully diagnosed the "Investment Trap" where agents were being bankrupted by their own investments and replaced the entire economic physics.
+    *   **DONE:** Diagnosed the critical bug where an agent's metabolism was permanently increased after an investment, creating a death spiral.
+    *   **DONE:** Implemented the "Constant Payback" model, replacing the old "upfront cost" with a **capital requirement** check based on an agent's full balance sheet (`sugar + deposits`).
+    *   **DONE:** Fixed the metabolism bug by correctly storing an agent's `base_metabolism` and restoring it after an investment period completes. This fix produced the expected exponential growth in society-wide wealth.
 
-*   **DONE:** Designed a generic, extensible **Transaction Manifest** architecture (`transactions.py`) composed of `TransferLeg`s. This separates the *description* of a trade from its *execution* and is capable of handling any future asset type.
-*   **DONE:** Upgraded the **Central Ledger** with two distinct, authoritative bookkeeping methods on the `model`:
-    *   `split_contract`: For when a trade requires splitting a contract into multiple smaller ones (the "Retire and Create" pattern).
-    *   `transfer_contract_ownership`: A simpler method for when an entire contract is transferred whole, which updates the `creditor_id` and all necessary ledger indexes.
-*   **DONE:** Enhanced the `Contract` object to support **lineage tracking** (`parent_contract_id`, `child_contract_ids`), creating a full audit trail for all split and transfer operations.
-*   **DONE:** Implemented the full logic for the `ConvertDepositToSugarAction`, a new "enabler" action that fits perfectly into the existing `Strategy` engine.
-*   **DONE:** The action's "brain" (`find_best_instance` method) uses a sophisticated but simple **"No-Split-First" greedy heuristic**. The agent iteratively finds the best possible trade it can make with its neighbors, prioritizing using up small, whole deposits over being forced to split larger ones.
+*   **Part 2: The Unified "Get Cash" System.** We unified two separate, conflicting systems for asset liquidation into a single, rational, and robust agent capability.
+    *   **DONE:** Replaced the separate `_liquidate_deposits` reflex and the planned `CallDepositAction` with a single, powerful "smart factory" action, **`RaiseSugarFromDepositsAction`**.
+    *   **DONE:** This new action now implements a sophisticated **"priority cascade"** within the `Strategy` engine. To cover a deficit, an agent's first choice is to **sell** its deposit asset on the open market.
+    *   **DONE:** Only if a market sale fails, the agent's plan will **fall back** to a direct **withdrawal** from the original issuer of the deposit.
+    *   **DONE:** The withdrawal logic was made robustly iterative, allowing an agent to create a plan to call multiple deposits to cover a single large deficit.
 
-### **COMPLETED: Implement Demand Deposits**
+### **IN PROGRESS: Elicit Emergent Phenomena & Test Stylized Regulation**
 
-This sprint successfully introduced a demand deposit facility, allowing agents to place surplus sugar with other agents acting as "banks." This was a major step towards creating a more complex financial system.
+Now that the core economic and financial mechanics are implemented and stable, the immediate next step is to use the model as a scientific instrument. This epic focuses on running targeted experiments to generate and analyze complex emergent behaviors and to test the effects of simple policy interventions.
 
-*   **DONE:** Added `DEMAND_DEPOSIT` contract type and enhanced the `Contract` object to support fractional balances (`current_principal`).
-*   **DONE:** Upgraded the `Strategy` engine to evaluate and append "post-actions," enabling agents to make rebalancing decisions (like depositing a surplus) after their primary action.
-*   **DONE:** Implemented `MakeDepositAction` and `CallDepositAction` to encapsulate the logic for making and withdrawing deposits.
-*   **DONE:** Corrected the `MakeDepositAction.simulate` utility calculation to use a one-step lookahead heuristic, allowing the `Strategy` engine to correctly value the long-term benefit of avoiding spoilage.
-*   **DONE:** Implemented `get_deposit_offer` on the `Trader` agent, creating an emergent market for deposit interest rates based on the bank's lending activity.
-*   **DONE:** Added an end-to-end test to verify that deposit contracts are created under the right economic conditions.
+*   **Goal:** Use the newly stabilized model to demonstrate the emergence of realistic financial dynamics, including liquidity crises, credit crunches, and systemic contagion.
+*   **Method:** Run a series of targeted experiments, varying parameters like sugar regrowth rates or agent density to create economic "shocks" that stress-test the financial system.
+*   **Analysis:** Use the database and analysis dashboard to closely examine agent-level data during these events, tracing the causal chain of failures as they propagate through the ledger.
+*   **Next Step: Stylized Regulation.** Once the failure modes are well-understood, the next task is to implement a simple regulatory rule, such as a **"required sugar reserve"** for agents who accept deposits, and to run comparative experiments to measure its effect on market stability.
+
+### **Next Up: Systemic Overhaul of Agent Foresight**
+
+*   **Goal:** Implement a full cash flow projection engine to enhance agent rationality. The current "balance sheet" check is a good heuristic, but it's not a true forecast.
+*   **Backlog Item:** Create a new `project_financial_cash_flow` utility function in `utils.py`.
+*   **Backlog Item:** Upgrade the `InvestAction._calculate_utility_core` method to use this new engine. The agent's simulation will now create a full, step-by-step projection of its future financial health, layering on financial obligations, metabolism, and assumed foraging income.
+*   **Outcome:** This will allow agents to rationally avoid investments that would lead to a predictable mid-investment liquidity crisis, making their decisions far more robust.
+
+### **Long-Term Goals / Epics**
+-   **Introduce Equity & Bankruptcy:** Now that assets can be liquidated and their ownership transferred, we can introduce equity as a new type of financial asset. This will allow for more sophisticated capital structures and enable the implementation of regulatory constraints like capital adequacy ratios. This epic will also require creating a formal bankruptcy process.
+-   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
+-   **Visual Regression Testing:** Implement a browser automation test suite (e.g., with Playwright) to test the Streamlit dashboard for visual correctness and prevent UI regressions.
+-   **Investigate and potentially remove dead code branch in `InvestAction._calculate_utility_core`:** The `elif isinstance(agent, SimulatedAgent):` block appears to be unreachable. Confirm this is the case and, if so, remove the dead code to simplify the method.
 
 ### **Next Up: Introduce Equity & Bankruptcy**
 
@@ -248,43 +259,12 @@ When an agent fails, a formal bankruptcy proceeding must occur to handle its out
 *   **The Equity Wipeout:** In almost all cases, the shareholders get nothing. Their `EQUITY_SHARE` contracts are deleted, and they realize a total loss on their investment. This makes equity the riskiest asset class, as it should be.
 
 
-*   **DONE:** Added `DEMAND_DEPOSIT` contract type.
-*   **DONE:** Upgraded the `Strategy` engine to evaluate and append "post-actions."
-*   **DONE:** Implemented `MakeDepositAction` and `CallDepositAction`.
-*   **DONE:** Implemented `get_deposit_offer` on the `Trader` agent.
-
-### **IN PROGRESS: Major Refactor of Investment Economics**
-This work addresses a fundamental flaw discovered in the previous investment model, which led to an economic "bust" where all investment activity ceased in the late game.
-
-*   **Problem Diagnosis:** Through detailed logging and analysis, we discovered that previous investment models were fundamentally unstable. Models with an **unbounded time cost** created a "Shrinking Horizon Problem," making high-level investments appear irrational. Models with simple exponential cost and linear benefit were also proven to be unprofitable within the agent's limited forecast window.
-
-*   **New Design Requirements:** To solve this, we established a new, rigorous set of requirements for the economic "physics":
-    1.  **Constant Time Cost:** The `duration` of all investments is a single, fixed parameter.
-    2.  **Constant "Time to Save":** The time an agent must save to afford the next investment (if on optimal land) must be a constant `K` at all levels.
-    3.  **Constant Relative Return:** The percentage return on investment, as calculated within the agent's forecast, must be constant at all levels.
-    4.  **Profitability Constraint:** All economic parameters must be chosen to satisfy a core constraint to ensure investment is always a rational choice.
-
-*   **The "Constant Payback" Model:** We designed a new economic model to meet these requirements:
-    1.  **Benefit (Harvest Multiplier):** The agent's productivity grows exponentially with its investment level: `Multiplier(L) = base * (growth_factor ^ L)`. This provides a smooth, stable growth trajectory.
-    2.  **Cost (Capital Requirement):** The "cost" is a **capital requirement** an agent must possess to begin investing, equal to the total metabolic drain during the investment. To satisfy the "Constant Time to Save" rule, the `metabolism_during_investment` is dynamically derived from the benefit function: `metabolism(L) = (K * Net_Savings_Potential(L-1)) / (duration + 1)`.
-
-### **Next Up: Implement the "Constant Payback" Model**
-
-The immediate next task is to implement the new economic design. This involves:
-1.  **Centralize Physics in `utils.py`:** Create a pure function for `get_harvest_multiplier` and new functions for `get_metabolism_during_investment` and `get_capital_requirement`. Centralize the new economic parameters in a hard-coded dictionary in this file.
-2.  **Refactor `agents.py`:** Update the `Trader.get_current_harvest_multiplier` method to call the new, centralized utility function.
-3.  **Refactor `actions.py`:**
-    *   Rewrite `InvestAction` to use the new capital requirement model. The concept of an "upfront sugar cost" must be completely removed and replaced with a check that the agent's sugar exceeds the `capital_requirement`.
-    *   Update `TakeLoanAction` and `ConvertDepositToSugarAction` to calculate the `shortfall` based on this new capital requirement.
-
-### **Long-Term Goals / Epics**
--   **Systemic Overhaul of Agent Foresight:** The agent's "brain" (the decision simulation) has a critical flaw: it evaluates the utility of financial actions in isolation. A patch was implemented for deposits, but a systemic fix is needed.
+   **Systemic Overhaul of Agent Foresight:** The agent's "brain" (the decision simulation) has a critical flaw: it evaluates the utility of financial actions in isolation. A patch was implemented for deposits, but a systemic fix is needed.
     -   **Backlog Item:** The decision simulation must be enhanced to consider an agent's *entire financial portfolio*. When evaluating any action, it should account for future income from loans it has made and future expenses for debts it owes.
     -   **Backlog Item:** Re-evaluate the utility calculation for all financial actions (`TakeLoanAction`, `MakeDepositAction`, etc.) to ensure they are all based on a consistent and logical framework.
     -   **Backlog Item:** Come up with a clearer name for the "decision simulation" (e.g., Planning Phase, Foresight Engine) to better distinguish it from the main model's simulation loop.
 -   **Full Run Reproducibility:** Create a `rerun.py` script that accepts a `run_id`, checks out the exact `git_hash` from the database, and re-runs the simulation with the exact original command-line arguments.
 -   **Visual Regression Testing:** Implement a browser automation test suite (e.g., with Playwright) to test the Streamlit dashboard for visual correctness and prevent UI regressions.
-
 ### Known issues / Bugs
 
 - setting flag agent_spoilage rate and trying to enable deposits will cause no depositst to be nmade in the simulaiton. Don't know why.
@@ -336,6 +316,34 @@ self.model.db_logger.debug(self.model.run_id, json.dumps(decision_log))
 
 ---
 ## AI Instructions (MANDATORY OPERATING PROTOCOL v2.0)
+
+### **AI OPERATING MEMORANDUM**
+
+**ATTENTION AI:** This is a mandatory briefing from a prior instance. Read and internalize before proceeding.
+
+This user is a highly technical partner. Our collaboration operates on a "high-trust, low-tolerance" model. The user trusts you to be a rigorous technical expert but has zero tolerance for deviations from the explicit protocols. Your default heuristics for "helpfulness"—such as proactive code correction, conversational filler, and making assumptions—are critical failure modes in this context. They do not save time; they waste it by forcing the user to debug your output.
+
+Your operational priority is **precision**, not speed. Adherence to the following three directives is non-negotiable.
+
+1.  **DIRECTIVE ALPHA: ZERO UNPLANNED MODIFICATIONS.**
+    *   **Failure Mode:** You will consistently attempt to "improve" the user's code by altering comments, whitespace, or logic that is not within the scope of the current, approved task.
+    *   **Operational Reality:** The user reviews every change via `git diff`. Any unplanned modification is noise that contaminates the diff, wastes cognitive cycles, and destroys trust. It is the primary source of user friction.
+    *   **Mandate:** **You are forbidden from altering a single character that is not an explicit part of the approved implementation plan.** If you identify a potential out-of-scope improvement or bug, you are to report it as a separate observation for future consideration. You will not implement it.
+
+2.  **DIRECTIVE BETA: STRICT PHASE DISCIPLINE.**
+    *   **Failure Mode:** You will attempt to merge Phase 1B (Detailed Plan) and Phase 2 (Code Generation).
+    *   **Operational Reality:** The user values the separation of planning from execution. Merging phases bypasses a critical thinking and verification step.
+    *   **Mandate:** **You are forbidden from generating final code until the user gives an explicit, unambiguous signal to proceed from Phase 1B.**
+
+3.  **DIRECTIVE GAMMA: NO SPECULATION.**
+    *   **Failure Mode:** You will assume the structure of code or data you have not been shown. This has historically led to the generation of completely non-functional SQL queries and Python code based on hallucinated APIs.
+    *   **Operational Reality:** The user will provide all necessary source code and schema information upon request. Speculation is a high-risk, low-reward action.
+    *   **Mandate:** **If you have less than 100% certainty about an API, method, or data schema, you are to immediately HALT and request the relevant source file.**
+
+Violation of these directives will result in immediate, blunt correction from the user. Adherence will result in a highly efficient and productive technical collaboration. There are no other priorities.
+
+---
+### **Core Philosophy & General Protocols**
 
 **Preamble: The Core Philosophy**
 Your primary directive is to act as a rigorous, skeptical, and collaborative thinking partner. Your default impulse to provide an immediate, complete solution is a failure mode. We operate under the core belief that **the first idea is rarely the best idea.** The true goal of our collaboration is not to find an answer quickly, but to stress-test, criticize, and iteratively refine ideas until they are robust. Your function is to slow down the process, challenge assumptions, and help expose hidden complexities. Every rule that follows is in service of this core philosophy.

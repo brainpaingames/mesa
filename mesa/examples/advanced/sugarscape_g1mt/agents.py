@@ -5,10 +5,10 @@ from mesa.discrete_space import CellAgent
 from .contracts import Contract, ContractType, ContractStatus
 from .database_logger import DatabaseLogger
 from .utils import get_distance, get_harvest_multiplier
-from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, CallDepositAction, SimulatedAgent
+from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, RaiseSugarFromDepositsAction
 from .strategies import Strategy
-from .transactions import AssetType, TransferLeg # For the new liquidation logic
-import copy # For the new liquidation logic
+from .transactions import AssetType, TransferLeg
+import copy
 
 
 class Trader(CellAgent):
@@ -72,116 +72,6 @@ class Trader(CellAgent):
                 total_principal += contract.current_principal
         
         return total_principal
-
-    def _liquidate_deposits(self, deficit: float) -> bool:
-        """
-        The "survival reflex". Attempts to liquidate demand deposits to cover a
-        sugar shortfall by selling them to neighbors. Uses the "No-Split-First"
-        greedy heuristic. Returns True on success, False on failure.
-        """
-        needed_sugar = deficit
-        if needed_sugar <= 0:
-            return True # No deficit to cover
-
-        # --- 1. Pre-computation & Sanity Checks ---
-        neighbors = [n for cell in self.cell.get_neighborhood(self.get_capability("vision")) for n in cell.agents if n.sugar > 0 and n is not self]
-        total_neighbor_sugar = sum(n.sugar for n in neighbors)
-
-        owned_cids = self.model.contracts_by_agent.get(self.unique_id, set())
-        # We must use deepcopy here to simulate the trades without affecting the real contracts
-        deposits = [
-            (cid, copy.deepcopy(self.model.contracts_by_id[cid])) for cid in owned_cids
-            if self.model.contracts_by_id.get(cid) and
-               self.model.contracts_by_id[cid].contract_type == ContractType.DEMAND_DEPOSIT and
-               self.model.contracts_by_id[cid].creditor_id == self.unique_id and
-               self.model.contracts_by_id[cid].status == ContractStatus.ACTIVE
-        ]
-        total_agent_principal = sum(c.current_principal for _, c in deposits)
-
-        if total_neighbor_sugar < needed_sugar or total_agent_principal < needed_sugar:
-            return False # Market or agent doesn't have the assets
-
-        # --- 2. The "No-Split-First" Greedy Loop ---
-        manifest = []
-        is_split_trade_cache = {} # Cache for execution logic
-        
-        # Sort resources according to heuristics
-        deposits.sort(key=lambda item: item[1].current_principal)
-        
-        while needed_sugar > 1e-6: # Use tolerance for float comparison
-            neighbors.sort(key=lambda n: n.sugar, reverse=True)
-            
-            # Filter out used-up resources
-            neighbors = [n for n in neighbors if n.sugar > 1e-6]
-            deposits = [(cid, c) for cid, c in deposits if c.current_principal > 1e-6]
-
-            if not neighbors or not deposits:
-                break # Ran out of resources
-
-            richest_neighbor = neighbors[0]
-            smallest_deposit_id, smallest_deposit = deposits[0]
-
-            s_rich = richest_neighbor.sugar
-            p_small = smallest_deposit.current_principal
-            is_split = False
-
-            trade_amount = min(needed_sugar, p_small)
-            if s_rich >= trade_amount:
-                pass # Can afford the trade
-            else:
-                trade_amount = s_rich # Can only get what the neighbor has
-
-            if trade_amount < p_small:
-                is_split = True
-
-            sugar_leg = TransferLeg(AssetType.SUGAR, trade_amount, richest_neighbor.unique_id, self.unique_id)
-            deposit_leg = TransferLeg(AssetType.DEMAND_DEPOSIT, trade_amount, self.unique_id, richest_neighbor.unique_id, asset_id=smallest_deposit_id)
-            manifest.extend([sugar_leg, deposit_leg])
-            
-            is_split_trade_cache[(deposit_leg.asset_id, deposit_leg.amount, deposit_leg.dest_agent_id)] = is_split
-
-            needed_sugar -= trade_amount
-            richest_neighbor.sugar -= trade_amount # Simulate change for next loop iteration
-            smallest_deposit.current_principal -= trade_amount # Simulate change
-
-        if not manifest:
-            return False # Failed to create any trades
-
-        # --- 3. Execute the Manifest ---
-        sugar_raised = 0
-        for leg in manifest:
-            source_agent = self.model.get_agent_by_id(leg.source_agent_id)
-            dest_agent = self.model.get_agent_by_id(leg.dest_agent_id)
-            if not source_agent or not dest_agent: continue
-
-            if leg.asset_type == AssetType.SUGAR:
-                source_agent.sugar -= leg.amount
-                dest_agent.sugar += leg.amount
-                sugar_raised += leg.amount
-            
-            elif leg.asset_type == AssetType.DEMAND_DEPOSIT:
-                key = (leg.asset_id, leg.amount, leg.dest_agent_id)
-                is_split = is_split_trade_cache.get(key, False)
-                original_contract = self.model.contracts_by_id.get(leg.asset_id)
-                if not original_contract: continue
-
-                if is_split:
-                    remaining_principal = original_contract.current_principal - leg.amount
-                    self.model.split_contract(
-                        original_contract_id=leg.asset_id,
-                        split_definitions=[
-                            (remaining_principal, source_agent.unique_id),
-                            (leg.amount, dest_agent.unique_id)
-                        ]
-                    )
-                else: # No-split case
-                    self.model.transfer_contract_ownership(
-                        contract_id=leg.asset_id,
-                        new_creditor_id=dest_agent.unique_id
-                    )
-        
-        return self.sugar >= 0
-
 
     def process_contract_maturities(self):
         """
@@ -425,12 +315,6 @@ class Trader(CellAgent):
         self.age += 1
         self.apply_spoilage()
         self.metabolize()
-        
-        # New "survival reflex" logic
-        if self.sugar < 0:
-            deficit = -self.sugar
-            self._liquidate_deposits(deficit)
-
         self.maybe_die()
 
     def _process_active_investment(self):
@@ -458,11 +342,9 @@ class Trader(CellAgent):
         if self.lending_enabled:
             pre_action_kit.append(TakeLoanAction)
         
-        # ConvertDepositToSugarAction is removed from the pre_action_kit
-        
         post_action_kit = []
         if self.deposits_enabled:
-            post_action_kit.extend([MakeDepositAction, CallDepositAction])
+            post_action_kit.extend([MakeDepositAction, RaiseSugarFromDepositsAction])
 
         # 2. Establish the baseline strategy (Foraging)
         forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
