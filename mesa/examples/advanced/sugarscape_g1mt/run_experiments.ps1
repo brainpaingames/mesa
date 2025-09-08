@@ -33,15 +33,15 @@ Write-Host "`n[1/4] Running: Baseline Experiment..." -ForegroundColor Cyan
 $run1_start = Get-Date
 
 python -m sugarscape_g1mt.run_batch --run_group "baseline" `
-    --total_steps 500 `
+    --total_steps 600 `
     --replications 1 `
-    --initial_population "[100,200,300,400]" `
+    --initial_population "[200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
     --endowment "[5, 5]" `
     --log_agent_data true `
-    --age "[1000,1000]" `
+    --age "[10000,10000]" `
     --investments_enabled false `
     --lending_enabled false `
     --deposits_enabled false `
@@ -57,15 +57,15 @@ Write-Host "`n[2/4] Running: Investments-Enabled Experiment..." -ForegroundColor
 $run2_start = Get-Date
 
 python -m sugarscape_g1mt.run_batch --run_group "baseline_investments" `
-    --total_steps 500 `
+    --total_steps 600 `
     --replications 1 `
-    --initial_population "[100,200,300,400]" `
+    --initial_population "[200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
     --endowment "[5, 5]" `
     --log_agent_data true `
-    --age "[1000,1000]" `
+    --age "[10000,10000]" `
     --investments_enabled true `
     --lending_enabled false `
     --deposits_enabled false `
@@ -81,15 +81,15 @@ Write-Host "`n[3/4] Running: Lending-Enabled Experiment..." -ForegroundColor Cya
 $run3_start = Get-Date
 
 python -m sugarscape_g1mt.run_batch --run_group "baseline_lending" `
-    --total_steps 500 `
+    --total_steps 600 `
     --replications 1 `
-    --initial_population "[100,200,300,400]" `
+    --initial_population "[200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `
     --endowment "[5, 5]" `
     --log_agent_data true `
-    --age "[1000,1000]" `
+    --age "[10000,10000]" `
     --investments_enabled true `
     --lending_enabled true `
     --deposits_enabled false `
@@ -99,15 +99,14 @@ $run3_duration = (Get-Date) - $run3_start
 Write-Host ("`n`t- Lending run finished in {0}" -f $run3_duration.ToString('hh\:mm\:ss')) -ForegroundColor Yellow
 Write-Host "-------------------------------------------------------------"
 
-
 # --- Experiment 4: Deposits Enabled ---
 Write-Host "`n[4/4] Running: Deposits-Enabled Experiment..." -ForegroundColor Cyan
 $run4_start = Get-Date
 
 python -m sugarscape_g1mt.run_batch --run_group "baseline_deposits" `
-    --total_steps 500 `
+    --total_steps 600 `
     --replications 1 `
-    --initial_population "[100]" `
+    --initial_population "[200]" `
     --agent_re_spawn true `
     --metabolism "[3.1, 3.1]" `
     --vision "[1, 1]" `

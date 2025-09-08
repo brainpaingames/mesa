@@ -6,6 +6,38 @@ import json
 from pathlib import Path
 
 
+
+def get_harvest_multiplier(level: int, base_multiplier: float, growth_factor: float) -> float:
+    """
+    Calculates the harvest multiplier for a given investment level.
+    This is a pure function.
+    """
+    return base_multiplier * (growth_factor ** level)
+
+
+def get_metabolism_during_investment(current_level: int, duration: int, constant_k: int, base_multiplier: float, growth_factor: float, reference_sugar: float, reference_metabolism: float) -> float:
+    """
+    Calculates the required metabolism during an investment to ensure a "Constant Time to Save".
+    This is a pure function derived from the economic model's core requirements.
+    """
+    current_multiplier = get_harvest_multiplier(current_level, base_multiplier, growth_factor)
+    
+    ref_gross_income = current_multiplier * reference_sugar
+    ref_net_savings = max(0, ref_gross_income - reference_metabolism)
+    
+    # Formula derived from the design requirements
+    return (constant_k * ref_net_savings) / (duration + 1)
+
+
+def get_capital_requirement(metabolism_during_investment: float, duration: int) -> float:
+    """
+    Calculates the total capital an agent must possess to survive the investment period.
+    This is a pure function.
+    """
+    # The agent must survive the investment period plus the step it completes.
+    return metabolism_during_investment * (duration + 1)
+
+
 def Gini(model):
     """Helper to calculate the Gini coefficient for agent wealth."""
     from .agents import Trader # Moved here to prevent circular import

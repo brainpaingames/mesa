@@ -1,15 +1,14 @@
-# sugarscape_g1mt/agents.py
-
 import math
 import json 
 import inspect
 from mesa.discrete_space import CellAgent
 from .contracts import Contract, ContractType, ContractStatus
-from .investment import SimulatedAgent
 from .database_logger import DatabaseLogger
-from .utils import get_distance
-from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, CallDepositAction
+from .utils import get_distance, get_harvest_multiplier
+from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, RaiseSugarFromDepositsAction
 from .strategies import Strategy
+from .transactions import AssetType, TransferLeg
+import copy
 
 
 class Trader(CellAgent):
@@ -17,11 +16,11 @@ class Trader(CellAgent):
     A trader agent that can choose between foraging and investing.
     - Has a metabolism of sugar.
     - Harvests sugar to survive.
-    - Can invest sugar to permanently reduce metabolism.
+    - Can invest sugar to permanently increase harvesting power.
     - Can lend, borrow, and accept deposits.
     """
 
-    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, opportunities=None, investments_enabled=True, lending_enabled=True, deposits_enabled=True, deposit_buffer_horizon=5, lender_vision=7, lender_look_ahead_horizon=20, spoilage_rate=0.0):
+    def __init__(self, model, cell, sugar=0, metabolism_sugar=0, vision=0, max_age=0, expected_lifespan=0, agent_look_ahead_horizon=15, investments_enabled=True, lending_enabled=True, deposits_enabled=True, deposit_buffer_horizon=5, lender_vision=7, lender_look_ahead_horizon=20, spoilage_rate=0.0, investment_params=None):
         super().__init__(model)
         self.cell = cell
         # Sanitize all numeric inputs to standard Python types
@@ -30,24 +29,49 @@ class Trader(CellAgent):
         self.max_age = int(max_age)
         self.expected_lifespan = float(expected_lifespan)
         self.age = 0
+        self.sugar_harvested_this_step = 0.0
 
         self._capabilities_DO_NOT_TOUCH = {
             "vision": int(vision),
             "metabolism_sugar": float(metabolism_sugar),
-            "harvest_multipliers": [0.0, 1.0, 1.0, 1.0, 1.0],
             "agent_look_ahead_horizon": int(agent_look_ahead_horizon)
         }
+        self.base_metabolism = float(metabolism_sugar)
         self.investments_enabled = investments_enabled
         self.lending_enabled = lending_enabled
         self.deposits_enabled = deposits_enabled
         self.deposit_buffer_horizon = int(deposit_buffer_horizon)
-        self.available_opportunities = opportunities.copy() if opportunities is not None else []
-        self.completed_investment_names = set()
+        
+        # Store agent's own copy of investment parameters
+        self.investment_params = investment_params if investment_params is not None else {}
+        
+        # --- New and Removed Attributes as per the plan ---
+        self.harvest_investment_level = 0
+        # self.available_opportunities and self.completed_investment_names are removed.
+        # The old "harvest_multipliers" capability is also obsolete.
+
         self.is_investing = False
         self.investment_counter = 0
         self.current_investment = None
         self.lender_vision = int(lender_vision)
         self.lender_look_ahead_horizon = int(lender_look_ahead_horizon)
+
+    def get_total_deposit_principal(self) -> float:
+        """
+        Calculates the total value of all active demand deposits owned by this agent.
+        """
+        total_principal = 0.0
+        my_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set())
+        
+        for contract_id in my_contract_ids:
+            contract = self.model.contracts_by_id.get(contract_id)
+            if (contract and
+                contract.contract_type == ContractType.DEMAND_DEPOSIT and
+                contract.creditor_id == self.unique_id and
+                contract.status == ContractStatus.ACTIVE):
+                total_principal += contract.current_principal
+        
+        return total_principal
 
     def process_contract_maturities(self):
         """
@@ -76,7 +100,6 @@ class Trader(CellAgent):
                         self.model.update_contract_status(contract_id, ContractStatus.DEFAULTED)
                     else:
                         self.model.update_contract_status(contract_id, ContractStatus.REPAID)
-
 
     def get_lending_offer(self, draft_contract: Contract, borrower_reservation_amount: float) -> float | None:
         """
@@ -204,7 +227,8 @@ class Trader(CellAgent):
             "expected_lifespan": float(self.expected_lifespan),
             "is_investing": int(self.is_investing),
             "agent_look_ahead_horizon": int(self.get_capability("agent_look_ahead_horizon")),
-            "completed_investments": json.dumps(list(self.completed_investment_names)),
+            # "completed_investments" is removed and replaced with the new level
+            "harvest_investment_level": int(self.harvest_investment_level),
         }
 
     def calculate_welfare(self, sugar):
@@ -220,11 +244,20 @@ class Trader(CellAgent):
         """
         return self.sugar <= 0
 
+    def get_current_harvest_multiplier(self) -> float:
+        """Calculates the harvest multiplier based on the agent's investment level."""
+        return get_harvest_multiplier(
+            level=self.harvest_investment_level,
+            base_multiplier=self.investment_params.get("base_harvest_multiplier", 1.0),
+            growth_factor=self.investment_params.get("benefit_growth_factor", 1.0)
+        )
+
     def get_potential_harvest(self, cell):
         """Calculates the potential sugar harvest from a given cell based on current capabilities."""
-        multipliers = self.get_capability("harvest_multipliers")
-        capacity = int(self.model.sugar_distribution[cell.coordinate[0], cell.coordinate[1]])
-        return cell.sugar * multipliers[capacity]
+        # The old `harvest_multipliers` capability is replaced by the new dynamic method.
+        multiplier = self.get_current_harvest_multiplier()
+        # The logic based on capacity has been simplified to a direct multiplier.
+        return cell.sugar * multiplier
 
     def find_best_foraging_cell(self):
         """Finds the best cell to forage from in the agent's vision, including its current cell."""
@@ -264,8 +297,10 @@ class Trader(CellAgent):
         """
         Agent harvests sugar from its current cell.
         """
-        self.sugar += self.get_potential_harvest(self.cell)
+        harvest_amount = self.get_potential_harvest(self.cell)
+        self.sugar += harvest_amount
         self.cell.sugar = 0
+        self.sugar_harvested_this_step = harvest_amount
 
     def apply_spoilage(self):
         """Applies percentage-based spoilage to the agent's sugar."""
@@ -285,14 +320,17 @@ class Trader(CellAgent):
     def _process_active_investment(self):
         """
         Handles the logic for a step where the agent is busy investing.
-        This involves decrementing the counter and applying the reward on completion.
+        This involves decrementing the counter. The reward is now handled by
+        the InvestAction's execute method.
         """
         self.investment_counter -= 1
         if self.investment_counter <= 0:
-            self.current_investment.apply_reward_to(self)
-            self.completed_investment_names.add(self.current_investment.name)
+            # The logic for applying the reward is removed from here.
+            # The agent's harvest_investment_level was already updated when the
+            # InvestAction was executed.
             self.is_investing = False
             self.current_investment = None
+            self.set_capability("metabolism_sugar", self.base_metabolism)
 
     def _find_best_plan(self):
         """
@@ -306,7 +344,7 @@ class Trader(CellAgent):
         
         post_action_kit = []
         if self.deposits_enabled:
-            post_action_kit.extend([MakeDepositAction, CallDepositAction])
+            post_action_kit.extend([MakeDepositAction, RaiseSugarFromDepositsAction])
 
         # 2. Establish the baseline strategy (Foraging)
         forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
@@ -314,14 +352,15 @@ class Trader(CellAgent):
         
         candidate_strategies = [forage_strategy]
 
-        # 3. Generate and evaluate investment strategies if enabled
-        if self.investments_enabled:
-            for opp in self.available_opportunities:
-                if opp.is_available(self):
-                    # Pass the assembled tool-kit to each investment strategy
-                    invest_strategy = Strategy(InvestAction(self, opp), pre_action_kit, post_action_kit)
-                    invest_strategy.evaluate(self, baseline_utility=baseline_utility)
-                    candidate_strategies.append(invest_strategy)
+        # 3. Generate and evaluate the single, dynamic investment strategy if enabled
+        if self.investments_enabled and self.investment_params:
+            next_level = self.harvest_investment_level + 1
+            # The call to InvestAction is updated to pass the agent's own investment_params
+            invest_action = InvestAction(self, target_level=next_level, investment_params=self.investment_params)
+            
+            invest_strategy = Strategy(invest_action, pre_action_kit, post_action_kit)
+            invest_strategy.evaluate(self, baseline_utility=baseline_utility)
+            candidate_strategies.append(invest_strategy)
 
         if not candidate_strategies:
             return []
@@ -331,13 +370,14 @@ class Trader(CellAgent):
 
         # Return the winning plan (a list of Action objects)
         return best_strategy.get_action_plan()
-
+    
     def step(self):
         """
         The main entry point for the agent's turn. It follows a strict
         sequence of operations: settle contracts, decide and act, and finally
         update biological state.
         """
+        self.sugar_harvested_this_step = 0.0
         self.process_contract_maturities()
 
         if self.is_investing:

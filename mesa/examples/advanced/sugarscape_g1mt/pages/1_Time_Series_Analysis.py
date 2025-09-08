@@ -51,15 +51,21 @@ def main(args):
 
     selected_ids = all_runs_df[all_runs_df['display'].isin(selected_display_runs)]['run_id'].tolist()
     
-    run_data = h.get_model_data_for_runs(DB_PATH, tuple(selected_ids), db_mod_time)
+    run_data_raw = h.get_model_data_for_runs(DB_PATH, tuple(selected_ids), db_mod_time)
 
-    if run_data.empty:
+    if run_data_raw.empty:
         st.warning("No model-level data found for the selected runs.")
         return
 
-    available_reporters = [col for col in run_data.columns if col not in ['run_id', 'step']]
+    # --- START: New Code ---
+    # Merge the descriptive 'display' name into the data DataFrame for plotting.
+    run_display_names = all_runs_df[['run_id', 'display']]
+    run_data = pd.merge(run_data_raw, run_display_names, on='run_id', how='inner')
+    # --- END: New Code ---
+
+    available_reporters = [col for col in run_data.columns if col not in ['run_id', 'step', 'display']]
     
-    default_reporters = [rep for rep in ["#Traders", "Gini"] if rep in available_reporters]
+    default_reporters = [rep for rep in ["Harvested Sugar", "Gini"] if rep in available_reporters]
 
     selected_reporters = st.sidebar.multiselect(
         "Select Reporters to Plot:",
@@ -70,7 +76,17 @@ def main(args):
     if selected_reporters:
         for reporter in selected_reporters:
             st.subheader(f"Plot for: {reporter}")
-            fig = px.line(run_data, x="step", y=reporter, color="run_id", title=f"{reporter} over Time")
+            # --- START: Modified Code ---
+            # Use the 'display' column for the color legend and customize the legend title.
+            fig = px.line(
+                run_data, 
+                x="step", 
+                y=reporter, 
+                color="display",  # Changed from "run_id"
+                title=f"{reporter} over Time",
+                labels={'display': 'Run'} # Cleaner legend title
+            )
+            # --- END: Modified Code ---
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Please select at least one reporter to plot.")

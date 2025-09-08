@@ -8,12 +8,101 @@ from typing import TYPE_CHECKING, List, Type, Tuple
 import copy
 
 from .contracts import Contract, ContractType, ContractStatus
-from .investment import SimulatedAgent
+from .utils import get_harvest_multiplier, get_metabolism_during_investment, get_capital_requirement
 from .transactions import AssetType, TransferLeg, TransactionManifest
 
 if TYPE_CHECKING:
     from .agents import Trader
-    from .investment import InvestmentOpportunity
+
+
+# --- The SimulatedAgent class is now located in this file ---
+class SimulatedAgent:
+    """
+    A lightweight, temporary agent for 'what-if' scenarios in utility calculations.
+    It mimics a real agent's state and capabilities but avoids deep object copies.
+    """
+    def __init__(self, real_agent: Trader):
+        self.real_agent = real_agent
+        self.sugar = real_agent.sugar
+        # Must be a deep copy so changes don't affect the real agent's dictionary
+        self._capabilities = copy.deepcopy(real_agent._capabilities_DO_NOT_TOUCH)
+
+        # --- New attribute to support dynamic investment simulation ---
+        self.harvest_investment_level = real_agent.harvest_investment_level
+        # Inherit the investment parameters directly from the real agent being simulated
+        self.investment_params = real_agent.investment_params
+
+        # --- New Simulated Portfolio ---
+        # A deep copy of the agent's financial assets for isolated simulation.
+        self.sim_portfolio = {} # {contract_id: contract_object_copy}
+        owned_contract_ids = self.real_agent.model.contracts_by_agent.get(self.real_agent.unique_id, set())
+        for cid in owned_contract_ids:
+            c = self.real_agent.model.contracts_by_id.get(cid)
+            # We only care about assets the agent owns and can transfer
+            if c and c.status == ContractStatus.ACTIVE and c.is_transferable and c.creditor_id == self.real_agent.unique_id:
+                self.sim_portfolio[cid] = copy.deepcopy(c)
+
+    def get_total_deposit_principal(self) -> float:
+        """
+        Calculates the total value of all active demand deposits in the simulated portfolio.
+        """
+        total_principal = 0.0
+        for contract in self.sim_portfolio.values():
+            if (contract.contract_type == ContractType.DEMAND_DEPOSIT and
+                contract.status == ContractStatus.ACTIVE):
+                total_principal += contract.current_principal
+        return total_principal
+
+
+    def get_capability(self, key):
+        return self._capabilities.get(key)
+    
+    def set_capability(self, key, value):
+        self._capabilities[key] = value
+
+    def get_current_harvest_multiplier(self) -> float:
+        """Calculates harvest multiplier based on the simulated agent's investment level."""
+        # This logic must mirror the real agent's helper method.
+        return get_harvest_multiplier(
+            level=self.harvest_investment_level,
+            base_multiplier=self.investment_params.get("base_harvest_multiplier", 1.0),
+            growth_factor=self.investment_params.get("benefit_growth_factor", 1.0)
+        )
+
+    def get_max_potential_harvest(self):
+        """
+        A simplified version of the real agent's perception, operating on the
+        real agent's model and cell but using the simulated agent's capabilities.
+        """
+        vision = self.get_capability('vision')
+        
+        # This perception logic must mirror the real agent's find_best_foraging_cell
+        neighboring_cells = [
+            cell for cell in self.real_agent.cell.get_neighborhood(vision, include_center=True)
+            if cell.is_empty or cell == self.real_agent.cell
+        ]
+        
+        if not neighboring_cells:
+            return 0
+
+        max_harvest = 0
+        for cell in neighboring_cells:
+            harvest = self.get_potential_harvest(cell)
+            if harvest > max_harvest:
+                max_harvest = harvest
+        
+        return max_harvest
+
+    def get_potential_harvest(self, cell):
+        """Calculates harvest based on simulated capabilities."""
+        # The old `harvest_multipliers` capability is replaced by a dynamic calculation.
+        multiplier = self.get_current_harvest_multiplier()
+        # Accesses the real model's static sugar distribution map
+        # capacity = int(self.real_agent.model.sugar_distribution[cell.coordinate[1], cell.coordinate[0]])
+        # Assuming a simple multiplier for now, not dependent on capacity.
+        # This might need to be adjusted if the old capacity-based logic is still desired.
+        return cell.sugar * multiplier
+
 
 class Action(ABC):
     """
@@ -75,7 +164,7 @@ class ForageAction(Action):
         if not self.target_cell:
             harvest_amount = 0
         else:
-            harvest_amount = self.agent.get_potential_harvest(self.target_cell)
+            harvest_amount = sim_agent.get_potential_harvest(self.target_cell)
         
         sim_agent.sugar += harvest_amount
 
@@ -91,22 +180,120 @@ class ForageAction(Action):
 
 
 class InvestAction(Action):
-    """An action for committing to an investment."""
-    def __init__(self, agent: Trader, opportunity: InvestmentOpportunity):
+    """An action for committing to a dynamic, level-based investment."""
+    def __init__(self, agent: Trader, target_level: int, investment_params: dict):
         super().__init__(agent)
-        self.opportunity = opportunity
+        self.target_level = target_level
+        self.params = investment_params
 
+        self.duration = self.params["investment_duration"]
+        self.metabolism_during_investment = get_metabolism_during_investment(
+            current_level=self.agent.harvest_investment_level,
+            duration=self.duration,
+            constant_k=self.params["constant_time_to_save"],
+            base_multiplier=self.params["base_harvest_multiplier"],
+            growth_factor=self.params["benefit_growth_factor"],
+            reference_sugar=self.params["max_sugar_capacity_for_ref_income"],
+            reference_metabolism=self.params["metabolism_normal_for_ref_income"]
+        )
+        self.capital_requirement = get_capital_requirement(
+            metabolism_during_investment=self.metabolism_during_investment,
+            duration=self.duration
+        )
+    
     def get_enabler_action_types(self) -> List[Type[Action]]:
-        """An investment can be enabled by taking a loan or converting assets."""
-        return [TakeLoanAction, ConvertDepositToSugarAction]
+        """An investment can be enabled by taking a loan."""
+        return [TakeLoanAction]
+
+    def _calculate_utility_core(self, agent: Trader, horizon: int, hypothetical_loan=None, starting_sim_agent=None) -> tuple[float, bool]:
+        """
+        Internal forecasting engine, formerly the logic of InvestmentOpportunity.calculate_utility.
+        Calculates the forecasted utility (final sugar) of undertaking this investment.
+        Returns a tuple of (utility, is_death).
+        """
+        # Determine the starting state for the simulation
+        if starting_sim_agent:
+            sim_agent = starting_sim_agent
+        elif isinstance(agent, SimulatedAgent):
+            sim_agent = agent
+        else:
+            sim_agent = SimulatedAgent(agent)
+        
+        # If a hypothetical loan is passed for a "what-if" scenario, add its principal
+        if hypothetical_loan:
+            sim_agent.sugar += hypothetical_loan.principal
+
+        # New "Balance Sheet" affordability check
+        if (sim_agent.sugar + sim_agent.get_total_deposit_principal()) < self.capital_requirement:
+            return -1, True # Dies immediately if they can't afford the capital requirement
+
+        # Get the agent's current contracts for the simulation
+        agent_contract_ids = sim_agent.real_agent.model.contracts_by_agent.get(sim_agent.real_agent.unique_id, set())
+        agent_contracts = [sim_agent.real_agent.model.contracts_by_id[cid] for cid in agent_contract_ids if sim_agent.real_agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
+
+        # Also include the hypothetical loan in the contract list for cash flow projection
+        if hypothetical_loan:
+            agent_contracts.append(hypothetical_loan)
+
+        # 1. Simulate survival during the investment period
+        cost_duration = self.duration
+        # The agent must survive the investment period AND the step it completes
+        metabolism_cost_steps = cost_duration + 1
+        
+        for i in range(metabolism_cost_steps):
+            current_sim_step = sim_agent.real_agent.model.steps + 1 + i
+            # --- Ledger-Aware Cash Flow Projection ---
+            for contract in agent_contracts:
+                if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
+                    if contract.creditor_id == sim_agent.real_agent.unique_id:
+                        sim_agent.sugar += contract.total_repayment_amount
+                    elif contract.debtor_id == sim_agent.real_agent.unique_id:
+                        sim_agent.sugar -= contract.total_repayment_amount
+            # --- End Ledger-Aware ---
+
+            sim_agent.sugar *= (1 - sim_agent.real_agent.spoilage_rate) # Sugar spoils
+            sim_agent.sugar -= self.metabolism_during_investment
+            
+            # This simulation does not yet account for the "just-in-time" liquidation reflex.
+            # It assumes the initial balance sheet is sufficient.
+            if sim_agent.sugar <= 0:
+                return -1, True # Agent dies during investment
+        
+        # 2. Apply the reward and forecast the rest of the horizon
+        # The "reward" is the new investment level for the simulated agent
+        sim_agent.harvest_investment_level = self.target_level
+        
+        remaining_horizon = horizon - metabolism_cost_steps
+        if remaining_horizon > 0:
+            expected_harvest = sim_agent.get_max_potential_harvest()
+            metabolism_after_investment = sim_agent.real_agent.base_metabolism
+            
+            for i in range(remaining_horizon):
+                current_sim_step = sim_agent.real_agent.model.steps + 1 + metabolism_cost_steps + i
+                # --- Ledger-Aware Cash Flow Projection ---
+                for contract in agent_contracts:
+                    if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
+                        if contract.creditor_id == sim_agent.real_agent.unique_id:
+                            sim_agent.sugar += contract.total_repayment_amount
+                        elif contract.debtor_id == sim_agent.real_agent.unique_id:
+                            sim_agent.sugar -= contract.total_repayment_amount
+                # --- End Ledger-Aware ---
+
+                sim_agent.sugar += expected_harvest
+                sim_agent.sugar *= (1 - sim_agent.real_agent.spoilage_rate) # Sugar spoils
+                sim_agent.sugar -= metabolism_after_investment
+                if sim_agent.sugar <= 0:
+                    return -1, True # Dies after investing, but before horizon ends
+        
+        return sim_agent.sugar, False
 
     def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
         """
         Simulates the entire lifecycle of an investment to determine its
-        long-term utility.
+        long-term utility by calling the internal forecasting engine.
         """
         horizon = self.agent.get_capability("agent_look_ahead_horizon")
-        final_sugar, is_death = self.opportunity.calculate_utility(self.agent, horizon, starting_sim_agent=sim_agent)
+        final_sugar, is_death = self._calculate_utility_core(self.agent, horizon, starting_sim_agent=sim_agent)
 
         if is_death:
             return -math.inf, sim_agent
@@ -120,17 +307,18 @@ class InvestAction(Action):
         This is used by the Strategy class to evaluate loan-funded scenarios.
         """
         horizon = agent.get_capability("agent_look_ahead_horizon")
-        # Pass the hypothetical loan down to the opportunity's calculator, which knows how to handle it.
-        return self.opportunity.calculate_utility(agent, horizon, hypothetical_loan=hypothetical_loan)
+        # Pass the hypothetical loan down to the core calculator.
+        return self._calculate_utility_core(agent, horizon, hypothetical_loan=hypothetical_loan)
 
     def execute(self):
         """Sets the agent's state to 'investing'."""
         self.agent.is_investing = True
-        self.agent.current_investment = self.opportunity
-        self.agent.investment_counter = self.opportunity.cost["duration"]
-        self.agent.set_capability("metabolism_sugar", self.opportunity.cost["metabolism_during_investment"])
-        if self.opportunity in self.agent.available_opportunities:
-             self.agent.available_opportunities.remove(self.opportunity)
+        self.agent.current_investment = self
+        self.agent.investment_counter = self.duration
+        self.agent.set_capability("metabolism_sugar", self.metabolism_during_investment)
+        # The reward is applied upon completion of the investment, but for state tracking,
+        # we update the agent's level now.
+        self.agent.harvest_investment_level = self.target_level
 
 
 class MakeDepositAction(Action):
@@ -227,49 +415,143 @@ class MakeDepositAction(Action):
         self.agent.model.register_contract(deposit_contract)
 
 
-class CallDepositAction(Action):
-    """A post-action for calling a deposit to cover a sugar deficit."""
-    def __init__(self, agent: Trader, contract_id: int, contract_to_call: Contract, amount_to_call: float):
+class RaiseSugarFromDepositsAction(Action):
+    """
+    A sophisticated post-action that raises sugar to cover a deficit.
+    It acts as a "factory", deciding on the best method (market sale or
+    direct withdrawal) and encapsulating the plan for execution.
+    """
+    def __init__(self, agent: Trader, plan_details: dict):
         super().__init__(agent)
-        self.contract_id = contract_id
-        self.contract_to_call = contract_to_call
-        self.amount_to_call = amount_to_call
+        self.plan_details = plan_details
 
     @classmethod
     def find_best_instance(cls, agent: Trader, sim_agent_state: SimulatedAgent, **kwargs) -> Action | None:
-        """Finds a deposit to call if the agent is in a simulated deficit."""
+        """The "Planner". Finds the best way to cover a simulated sugar deficit."""
         metabolism = agent.get_capability('metabolism_sugar')
         deficit = max(0, metabolism - sim_agent_state.sugar)
 
         if deficit <= 0:
             return None
         
-        # Correctly get the agent's contract IDs from the model
-        owned_contract_ids = agent.model.contracts_by_agent.get(agent.unique_id, set())
+        # --- Priority 1: Attempt to Sell on the Open Market ---
+        needed_sugar = deficit
+        neighbors = [n for cell in agent.cell.get_neighborhood(agent.get_capability("vision")) for n in cell.agents if n.sugar > 0 and n is not agent]
         
-        for contract_id in owned_contract_ids:
-            contract = agent.model.contracts_by_id.get(contract_id)
-            if (contract and
-                contract.contract_type == ContractType.DEMAND_DEPOSIT and
-                contract.creditor_id == agent.unique_id and
-                contract.status == ContractStatus.ACTIVE and
-                contract.current_principal > 0):
+        owned_cids = agent.model.contracts_by_agent.get(agent.unique_id, set())
+        sim_deposits = [
+            (cid, copy.deepcopy(agent.model.contracts_by_id[cid])) for cid in owned_cids
+            if agent.model.contracts_by_id.get(cid) and
+               agent.model.contracts_by_id[cid].contract_type == ContractType.DEMAND_DEPOSIT and
+               agent.model.contracts_by_id[cid].creditor_id == agent.unique_id and
+               agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE
+        ]
+        
+        if sum(n.sugar for n in neighbors) >= needed_sugar and sum(c.current_principal for _, c in sim_deposits) >= needed_sugar:
+            manifest = []
+            is_split_trade_cache = {}
+            sim_deposits.sort(key=lambda item: item[1].current_principal)
+            
+            temp_needed_sugar = needed_sugar
+            while temp_needed_sugar > 1e-6:
+                neighbors.sort(key=lambda n: n.sugar, reverse=True)
+                neighbors = [n for n in neighbors if n.sugar > 1e-6]
+                sim_deposits = [(cid, c) for cid, c in sim_deposits if c.current_principal > 1e-6]
+
+                if not neighbors or not sim_deposits: break
+
+                richest_neighbor = neighbors[0]
+                smallest_deposit_id, smallest_deposit = sim_deposits[0]
                 
-                # Simple strategy: call the first suitable one found
-                amount_to_call = min(deficit, contract.current_principal)
-                return cls(agent, contract_id, contract, amount_to_call)
+                trade_amount = min(temp_needed_sugar, smallest_deposit.current_principal, richest_neighbor.sugar)
+                if trade_amount <= 1e-6: break
+
+                is_split = trade_amount < smallest_deposit.current_principal
+
+                manifest.append(TransferLeg(AssetType.SUGAR, trade_amount, richest_neighbor.unique_id, agent.unique_id))
+                deposit_leg = TransferLeg(AssetType.DEMAND_DEPOSIT, trade_amount, agent.unique_id, richest_neighbor.unique_id, asset_id=smallest_deposit_id)
+                manifest.append(deposit_leg)
+                is_split_trade_cache[(deposit_leg.asset_id, deposit_leg.amount, deposit_leg.dest_agent_id)] = is_split
+
+                temp_needed_sugar -= trade_amount
+                richest_neighbor.sugar -= trade_amount
+                smallest_deposit.current_principal -= trade_amount
+            
+            sugar_raised = needed_sugar - temp_needed_sugar
+            if manifest and math.isclose(sugar_raised, needed_sugar):
+                plan_details = {"type": "SALE", "amount_to_raise": sugar_raised, "manifest": manifest, "is_split_cache": is_split_trade_cache}
+                return cls(agent, plan_details)
+
+        # --- Priority 2 (Fallback): Withdraw from Issuer ---
+        owned_contract_ids = agent.model.contracts_by_agent.get(agent.unique_id, set())
+        available_deposits = [
+            (cid, agent.model.contracts_by_id.get(cid)) for cid in owned_contract_ids if 
+            agent.model.contracts_by_id.get(cid) and 
+            agent.model.contracts_by_id.get(cid).contract_type == ContractType.DEMAND_DEPOSIT and 
+            agent.model.contracts_by_id.get(cid).creditor_id == agent.unique_id and 
+            agent.model.contracts_by_id.get(cid).status == ContractStatus.ACTIVE
+        ]
+        available_deposits.sort(key=lambda item: item[1].current_principal)
+        
+        withdrawal_plan = []
+        sugar_raised = 0
+        for contract_id, contract in available_deposits:
+            if sugar_raised >= deficit: break
+            
+            amount_to_call = contract.current_principal
+            withdrawal_plan.append({"contract_id": contract_id, "contract_to_call": contract, "amount_to_call": amount_to_call})
+            sugar_raised += amount_to_call
+        
+        if withdrawal_plan:
+            plan_details = {"type": "WITHDRAWAL", "amount_to_raise": sugar_raised, "withdrawal_plan": withdrawal_plan}
+            return cls(agent, plan_details)
         
         return None
     
     def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
-        """Simulates receiving the called sugar."""
-        sim_agent.sugar += self.amount_to_call
+        """Simulates receiving the raised sugar."""
+        amount_to_raise = self.plan_details.get("amount_to_raise", 0)
+        sim_agent.sugar += amount_to_raise
+        # The utility is simply the final sugar state, no complex lookahead needed
         return sim_agent.sugar, sim_agent
 
     def execute(self):
-        """Executes the call via the model's authoritative method."""
-        # Now we have the contract_id to pass to the model
-        self.agent.model.process_deposit_call(self.contract_id, self.contract_to_call, self.amount_to_call)
+        """The "Executor". Reads the plan and dispatches to the correct logic."""
+        plan_type = self.plan_details.get("type")
+
+        if plan_type == "SALE":
+            manifest = self.plan_details["manifest"]
+            is_split_cache = self.plan_details["is_split_cache"]
+            for leg in manifest:
+                source_agent = self.agent.model.get_agent_by_id(leg.source_agent_id)
+                dest_agent = self.agent.model.get_agent_by_id(leg.dest_agent_id)
+                if not source_agent or not dest_agent: continue
+
+                if leg.asset_type == AssetType.SUGAR:
+                    source_agent.sugar -= leg.amount
+                    dest_agent.sugar += leg.amount
+                elif leg.asset_type == AssetType.DEMAND_DEPOSIT:
+                    key = (leg.asset_id, leg.amount, leg.dest_agent_id)
+                    is_split = is_split_cache.get(key, False)
+                    original_contract = self.agent.model.contracts_by_id.get(leg.asset_id)
+                    if not original_contract: continue
+                    
+                    if is_split:
+                        remaining_principal = original_contract.current_principal - leg.amount
+                        self.agent.model.split_contract(
+                            original_contract_id=leg.asset_id,
+                            split_definitions=[(remaining_principal, source_agent.unique_id), (leg.amount, dest_agent.unique_id)]
+                        )
+                    else:
+                        self.agent.model.transfer_contract_ownership(contract_id=leg.asset_id, new_creditor_id=dest_agent.unique_id)
+        
+        elif plan_type == "WITHDRAWAL":
+            for withdrawal in self.plan_details["withdrawal_plan"]:
+                self.agent.model.process_deposit_call(
+                    withdrawal["contract_id"],
+                    withdrawal["contract_to_call"],
+                    withdrawal["amount_to_call"]
+                )
 
 
 class TakeLoanAction(Action):
@@ -286,16 +568,21 @@ class TakeLoanAction(Action):
         """
         Contains all logic for discovering and negotiating a loan.
         """
-        opportunity = core_action_to_enable.opportunity
+        # Now that logic is merged, core_action_to_enable is the InvestAction instance itself.
+        opportunity = core_action_to_enable
         
         # Calculate how much sugar is needed
-        survival_cost = opportunity.cost["metabolism_during_investment"] * (opportunity.cost["duration"] + 1)
-        shortfall = max(0, survival_cost - agent.sugar)
+        survival_buffer = agent.get_capability("metabolism_sugar")
+        
+        # Calculate shortfall against the total balance sheet, not just sugar
+        current_assets = agent.sugar + agent.get_total_deposit_principal()
+        shortfall = max(0, opportunity.capital_requirement - current_assets + survival_buffer)
+
         amount_needed = shortfall
         if amount_needed <= 0:
             return None
         
-        term = opportunity.cost["duration"] + 10
+        term = opportunity.duration + 10
         
         # 1. Simulate a zero-interest loan to find the best-case utility
         draft_contract = Contract(contract_type=ContractType.TERM_LOAN, creditor_id=-1, debtor_id=agent.unique_id, principal=amount_needed, interest_schedule=[0], term_steps=term)
@@ -347,138 +634,3 @@ class TakeLoanAction(Action):
         self.lender.sugar -= self.principal
         self.agent.sugar += self.principal
         self.agent.model.register_contract(final_contract)
-
-
-class ConvertDepositToSugarAction(Action):
-    """
-    A self-contained action for liquidating deposits to generate sugar.
-    Its planner uses the "No-Split-First" greedy heuristic.
-    """
-    def __init__(self, agent: Trader, manifest: TransactionManifest, sugar_to_generate: float):
-        super().__init__(agent)
-        self.manifest = manifest
-        self.sugar_to_generate = sugar_to_generate
-        self.is_split_trade = {} # Cache for execution logic
-
-    @classmethod
-    def find_best_instance(cls, agent: Trader, core_action_to_enable: Action, **kwargs) -> Action | None:
-        """The 'Planner'. Builds a transaction manifest to cover a sugar shortfall."""
-        if not isinstance(core_action_to_enable, InvestAction):
-            return None
-        
-        opportunity = core_action_to_enable.opportunity
-        cost_of_survival = opportunity.cost["metabolism_during_investment"] * (opportunity.cost["duration"] + 1)
-        shortfall = max(0, cost_of_survival - agent.sugar)
-
-        if shortfall <= 0:
-            return None
-
-        # --- 1. Pre-computation & Sanity Checks ---
-        neighbors = [n for cell in agent.cell.get_neighborhood(agent.vision) for n in cell.agents if n.sugar > 0]
-        total_neighbor_sugar = sum(n.sugar for n in neighbors)
-
-        owned_cids = agent.model.contracts_by_agent.get(agent.unique_id, set())
-        deposits = [
-            (cid, copy.copy(agent.model.contracts_by_id[cid])) for cid in owned_cids
-            if agent.model.contracts_by_id.get(cid) and
-               agent.model.contracts_by_id[cid].contract_type == ContractType.DEMAND_DEPOSIT and
-               agent.model.contracts_by_id[cid].creditor_id == agent.unique_id and
-               agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE
-        ]
-        total_agent_principal = sum(c.current_principal for _, c in deposits)
-
-        if total_neighbor_sugar < shortfall or total_agent_principal < shortfall:
-            return None
-
-        # --- 2. The "No-Split-First" Greedy Loop ---
-        manifest: TransactionManifest = []
-        needed_sugar = shortfall
-        
-        # Sort resources according to heuristics
-        deposits.sort(key=lambda item: item[1].current_principal)
-        
-        while needed_sugar > 1e-6: # Use tolerance for float comparison
-            # Find current best resources
-            neighbors.sort(key=lambda n: n.sugar, reverse=True)
-            
-            # Filter out used-up resources
-            neighbors = [n for n in neighbors if n.sugar > 1e-6]
-            deposits = [(cid, c) for cid, c in deposits if c.current_principal > 1e-6]
-
-            if not neighbors or not deposits:
-                break # Ran out of resources
-
-            richest_neighbor = neighbors[0]
-            smallest_deposit_id, smallest_deposit = deposits[0]
-
-            # --- 3. The "No-Split" Rule ---
-            s_rich = richest_neighbor.sugar
-            p_small = smallest_deposit.current_principal
-            is_split = False
-
-            if s_rich >= p_small:
-                trade_amount = p_small # Use the whole deposit
-            else: # s_rich < p_small
-                trade_amount = s_rich # Forced to split to get the last sugar
-                is_split = True
-
-            # --- 4. Build Manifest Legs for this Trade ---
-            sugar_leg = TransferLeg(AssetType.SUGAR, trade_amount, richest_neighbor.unique_id, agent.unique_id)
-            deposit_leg = TransferLeg(AssetType.DEMAND_DEPOSIT, trade_amount, agent.unique_id, richest_neighbor.unique_id, asset_id=smallest_deposit_id)
-            manifest.extend([sugar_leg, deposit_leg])
-            
-            # This is a temporary cache used by execute() to know which model function to call.
-            # We associate it with the deposit leg's unique tuple representation.
-            cls.is_split_trade[(deposit_leg.asset_id, deposit_leg.amount, deposit_leg.dest_agent_id)] = is_split
-
-            # --- 5. Update State for Next Loop Iteration ---
-            needed_sugar -= trade_amount
-            richest_neighbor.sugar -= trade_amount # Simulate change
-            smallest_deposit.current_principal -= trade_amount # Simulate change
-
-        if manifest:
-            sugar_generated = shortfall - needed_sugar
-            return cls(agent, manifest, sugar_generated)
-        
-        return None
-
-    def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
-        """The 'Simulator'. Simply adds the generated sugar to the sim_agent."""
-        sim_agent.sugar += self.sugar_to_generate
-        return sim_agent.sugar, sim_agent
-
-    def execute(self):
-        """The 'Executor'. Reads the manifest and calls the correct model functions."""
-        # A bit of a hack to pass the is_split info from the planner to the executor
-        is_split_cache = self.__class__.is_split_trade
-        
-        for leg in self.manifest:
-            source_agent = self.agent.model.get_agent_by_id(leg.source_agent_id)
-            dest_agent = self.agent.model.get_agent_by_id(leg.dest_agent_id)
-            if not source_agent or not dest_agent: continue
-
-            if leg.asset_type == AssetType.SUGAR:
-                source_agent.sugar -= leg.amount
-                dest_agent.sugar += leg.amount
-            
-            elif leg.asset_type == AssetType.DEMAND_DEPOSIT:
-                key = (leg.asset_id, leg.amount, leg.dest_agent_id)
-                is_split = is_split_cache.get(key, False)
-
-                if is_split:
-                    original_contract = self.agent.model.contracts_by_id.get(leg.asset_id)
-                    if not original_contract: continue
-                    remaining_principal = original_contract.current_principal - leg.amount
-                    
-                    self.agent.model.split_contract(
-                        original_contract_id=leg.asset_id,
-                        split_definitions=[
-                            (remaining_principal, source_agent.unique_id),
-                            (leg.amount, dest_agent.unique_id)
-                        ]
-                    )
-                else: # No-split case
-                    self.agent.model.transfer_contract_ownership(
-                        contract_id=leg.asset_id,
-                        new_creditor_id=dest_agent.unique_id
-                    )

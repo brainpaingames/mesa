@@ -5,13 +5,13 @@ import math
 import json
 from typing import TYPE_CHECKING, List, Type
 
-from .actions import Action, InvestAction, TakeLoanAction
-from .investment import SimulatedAgent
+# The import of SimulatedAgent is now from .actions
+from .actions import Action, InvestAction, TakeLoanAction, SimulatedAgent
 from .contracts import Contract, ContractType
 
 if TYPE_CHECKING:
     from .agents import Trader
-    from .investment import InvestmentOpportunity
+    # The import of InvestmentOpportunity is no longer needed.
 
 class Strategy:
     """
