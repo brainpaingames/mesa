@@ -320,6 +320,19 @@ class SugarscapeG1mt(mesa.Model):
     
     # The _create_agent_opportunities method has been deleted.
 
+    def _process_bankruptcy(self, dead_agent_id: int):
+        """
+        Processes the "brutal cancellation" bankruptcy for a dead agent.
+        Finds all contracts the agent is a party to and marks them as defaulted.
+        """
+        # Use .copy() to avoid modifying the set while iterating over it.
+        agent_contract_ids = self.contracts_by_agent.get(dead_agent_id, set()).copy()
+        
+        for contract_id in agent_contract_ids:
+            # This is the "brutal" part: all contracts are simply defaulted.
+            self.update_contract_status(contract_id, ContractStatus.DEFAULTED)
+
+
     def _add_new_agent(self):
         """Helper method to add a single new agent to the model."""
         empty_cells = [cell for cell in self.grid.all_cells.cells if cell.is_empty]

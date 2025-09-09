@@ -1,3 +1,4 @@
+# 1_Time_Series_Analysis
 import sys
 from pathlib import Path
 
@@ -76,6 +77,17 @@ def main(args):
     if selected_reporters:
         for reporter in selected_reporters:
             st.subheader(f"Plot for: {reporter}")
+            # --- START: Added Code Block for Manual Y-Axis Control ---
+            min_val_default = float(run_data[reporter].min())
+            max_val_default = float(run_data[reporter].max()) * 1.05
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                y_min = st.number_input("Y-Axis Min", value=min_val_default, key=f"ymin_{reporter}")
+            with col2:
+                y_max = st.number_input("Y-Axis Max", value=max_val_default, key=f"ymax_{reporter}")
+            # --- END: Added Code Block for Manual Y-Axis Control ---
+            
             # --- START: Modified Code ---
             # Use the 'display' column for the color legend and customize the legend title.
             fig = px.line(
@@ -87,6 +99,11 @@ def main(args):
                 labels={'display': 'Run'} # Cleaner legend title
             )
             # --- END: Modified Code ---
+            
+            # --- START: Added line to apply the manual range ---
+            fig.update_yaxes(range=[y_min, y_max])
+            # --- END: Added line to apply the manual range ---
+            
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Please select at least one reporter to plot.")

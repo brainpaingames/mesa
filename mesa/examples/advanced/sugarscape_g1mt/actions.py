@@ -634,3 +634,30 @@ class TakeLoanAction(Action):
         self.lender.sugar -= self.principal
         self.agent.sugar += self.principal
         self.agent.model.register_contract(final_contract)
+
+class ContinueInvestmentAction(Action):
+    """
+    A placeholder 'do-nothing' action that represents the agent's state
+    of continuing an existing investment.
+
+    Its primary purpose is to serve as a baseline core action within the Strategy
+    engine. This allows the agent to evaluate and execute reactive post-actions
+    (like RaiseSugarFromDepositsAction) even while it is 'busy' investing.
+    """
+    def __init__(self, agent: Trader):
+        super().__init__(agent)
+
+    def simulate(self, sim_agent: SimulatedAgent) -> tuple[float, SimulatedAgent]:
+        """
+        This action does not change the agent's state or produce utility on its own.
+        It simply reflects the agent's current state for the Strategy engine.
+        """
+        return sim_agent.sugar, sim_agent
+
+    def execute(self):
+        """
+        This action has no direct execution logic. The processing of the
+        investment (e.g., decrementing the counter) is handled as a
+        non-discretionary part of the agent's end-of-step lifecycle.
+        """
+        pass

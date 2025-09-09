@@ -1,3 +1,5 @@
+# agents.py
+
 import math
 import json 
 import inspect
@@ -5,7 +7,7 @@ from mesa.discrete_space import CellAgent
 from .contracts import Contract, ContractType, ContractStatus
 from .database_logger import DatabaseLogger
 from .utils import get_distance, get_harvest_multiplier
-from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, RaiseSugarFromDepositsAction
+from .actions import ForageAction, InvestAction, TakeLoanAction, MakeDepositAction, RaiseSugarFromDepositsAction, ContinueInvestmentAction
 from .strategies import Strategy
 from .transactions import AssetType, TransferLeg
 import copy
@@ -311,86 +313,91 @@ class Trader(CellAgent):
         """
         Handles the final, non-discretionary part of the agent's step,
         including aging, spoilage, metabolism, and checking for death.
+        Also now handles the processing of an active investment.
         """
+        # --- Investment processing logic moved here ---
+        if self.is_investing:
+            self.investment_counter -= 1
+            if self.investment_counter <= 0:
+                self.is_investing = False
+                self.current_investment = None
+                self.set_capability("metabolism_sugar", self.base_metabolism)
+        # --- End of moved logic ---
+
         self.age += 1
         self.apply_spoilage()
         self.metabolize()
         self.maybe_die()
 
-    def _process_active_investment(self):
-        """
-        Handles the logic for a step where the agent is busy investing.
-        This involves decrementing the counter. The reward is now handled by
-        the InvestAction's execute method.
-        """
-        self.investment_counter -= 1
-        if self.investment_counter <= 0:
-            # The logic for applying the reward is removed from here.
-            # The agent's harvest_investment_level was already updated when the
-            # InvestAction was executed.
-            self.is_investing = False
-            self.current_investment = None
-            self.set_capability("metabolism_sugar", self.base_metabolism)
 
     def _find_best_plan(self):
         """
-        The agent's new "brain". It creates a "tournament" of possible strategies,
-        evaluates them, and returns the action plan of the winner.
+        The agent's "brain". It creates a "tournament" of possible strategies,
+        evaluates them, and returns the action plan of the winner. This method
+        is now state-aware, running a simplified "reflex" check if the agent
+        is already investing.
         """
-        # 1. Assemble the "tool-kit" of available action types based on flags
-        pre_action_kit = []
-        if self.lending_enabled:
-            pre_action_kit.append(TakeLoanAction)
-        
+        # Assemble the "tool-kit" of available action types based on flags
         post_action_kit = []
         if self.deposits_enabled:
             post_action_kit.extend([MakeDepositAction, RaiseSugarFromDepositsAction])
 
-        # 2. Establish the baseline strategy (Foraging)
-        forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
-        baseline_utility = forage_strategy.evaluate(self)
+        if self.is_investing:
+            # --- "Conscious Investor" Logic ---
+            # The agent is busy, so its only "core" action is to continue.
+            # However, it can still use its post-action reflexes to survive.
+            pre_action_kit = [] # No pre-actions needed when continuing
+            continue_strategy = Strategy(ContinueInvestmentAction(self), pre_action_kit, post_action_kit)
+            continue_strategy.evaluate(self)
+            return continue_strategy.get_action_plan()
         
-        candidate_strategies = [forage_strategy]
+        else:
+            # --- Full "Tournament" Logic for a non-investing agent ---
+            pre_action_kit = []
+            if self.lending_enabled:
+                pre_action_kit.append(TakeLoanAction)
 
-        # 3. Generate and evaluate the single, dynamic investment strategy if enabled
-        if self.investments_enabled and self.investment_params:
-            next_level = self.harvest_investment_level + 1
-            # The call to InvestAction is updated to pass the agent's own investment_params
-            invest_action = InvestAction(self, target_level=next_level, investment_params=self.investment_params)
+            # Establish the baseline strategy (Foraging)
+            forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
+            baseline_utility = forage_strategy.evaluate(self)
             
-            invest_strategy = Strategy(invest_action, pre_action_kit, post_action_kit)
-            invest_strategy.evaluate(self, baseline_utility=baseline_utility)
-            candidate_strategies.append(invest_strategy)
+            candidate_strategies = [forage_strategy]
 
-        if not candidate_strategies:
-            return []
-        
-        # 4. Find the winning strategy from the fully evaluated candidates
-        best_strategy = max(candidate_strategies, key=lambda s: s.utility)
+            # Generate and evaluate the single, dynamic investment strategy if enabled
+            if self.investments_enabled and self.investment_params:
+                next_level = self.harvest_investment_level + 1
+                invest_action = InvestAction(self, target_level=next_level, investment_params=self.investment_params)
+                
+                invest_strategy = Strategy(invest_action, pre_action_kit, post_action_kit)
+                invest_strategy.evaluate(self, baseline_utility=baseline_utility)
+                candidate_strategies.append(invest_strategy)
 
-        # Return the winning plan (a list of Action objects)
-        return best_strategy.get_action_plan()
+            if not candidate_strategies:
+                return []
+            
+            # Find the winning strategy from the fully evaluated candidates
+            best_strategy = max(candidate_strategies, key=lambda s: s.utility)
+
+            # Return the winning plan (a list of Action objects)
+            return best_strategy.get_action_plan()
     
     def step(self):
         """
         The main entry point for the agent's turn. It follows a strict
         sequence of operations: settle contracts, decide and act, and finally
-        update biological state.
+        update biological state. The main branching logic has been removed.
         """
         self.sugar_harvested_this_step = 0.0
         self.process_contract_maturities()
 
-        if self.is_investing:
-            self._process_active_investment()
-        else:
-            # The new, cleaner decision-making process
-            best_plan = self._find_best_plan()
-            
-            # Execute the sequence of actions in the winning plan
-            if best_plan:
-                for action in best_plan:
-                    action.execute()
-            
+        # The new, cleaner decision-making process is now always called
+        best_plan = self._find_best_plan()
+        
+        # Execute the sequence of actions in the winning plan
+        if best_plan:
+            for action in best_plan:
+                action.execute()
+        
         self._update_lifecycle_and_metabolize()
 
     def metabolize(self):
@@ -400,6 +407,8 @@ class Trader(CellAgent):
     def maybe_die(self):
         """
         Function to remove agents who have consumed all their sugar.
+        It now triggers the model's bankruptcy process before removal.
         """
         if self.is_starved() or self.age >= self.max_age:
+            self.model._process_bankruptcy(self.unique_id)
             self.remove()
