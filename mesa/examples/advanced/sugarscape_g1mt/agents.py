@@ -78,7 +78,9 @@ class Trader(CellAgent):
     def process_contract_maturities(self):
         """
         Handles accounting for any contracts that are due on the current step.
-        This method is non-discretionary.
+        This method is non-discretionary. It will now use the agent's full
+        liquid assets (deposits first, then sugar) to repay debts. If it
+        cannot fully repay, it triggers a "death on default" event.
         """
         my_contract_ids = self.model.contracts_by_agent.get(self.unique_id, set()).copy()
 
@@ -89,19 +91,65 @@ class Trader(CellAgent):
 
             if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == self.model.steps:
                 if contract.debtor_id == self.unique_id:
+                    # --- START: New Repayment and Default Logic ---
                     amount_due = contract.total_repayment_amount
-                    payment = min(self.sugar, amount_due)
-                    
-                    self.sugar -= payment
-                    
                     creditor = self.model.get_agent_by_id(contract.creditor_id)
-                    if creditor:
-                        creditor.sugar += payment
 
-                    if payment < amount_due:
+                    if not creditor:
+                        self.model.update_contract_status(contract_id, ContractStatus.CLOSED)
+                        continue
+
+                    # --- Payment Priority 1: Use Deposits ---
+                    owned_deposit_cids = [
+                        cid for cid in self.model.contracts_by_agent.get(self.unique_id, set())
+                        if (c := self.model.contracts_by_id.get(cid)) and
+                           c.contract_type == ContractType.DEMAND_DEPOSIT and
+                           c.creditor_id == self.unique_id and
+                           c.status == ContractStatus.ACTIVE
+                    ]
+                    owned_deposits = [self.model.contracts_by_id[cid] for cid in owned_deposit_cids]
+                    owned_deposits.sort(key=lambda c: c.current_principal)
+
+                    for deposit in owned_deposits:
+                        if amount_due < 1e-6: break
+
+                        deposit_cid = next(cid for cid, c in self.model.contracts_by_id.items() if c is deposit)
+                        deposit_principal = deposit.current_principal
+
+                        if deposit_principal <= amount_due:
+                            self.model.transfer_contract_ownership(deposit_cid, creditor.unique_id)
+                            amount_due -= deposit_principal
+                        else:
+                            self.model.transfer_contract_ownership(deposit_cid, creditor.unique_id)
+                            change_due = deposit_principal - amount_due
+                            change_contract = Contract(
+                                contract_type=ContractType.DEMAND_DEPOSIT,
+                                creditor_id=self.unique_id,
+                                debtor_id=creditor.unique_id,
+                                principal=change_due,
+                                interest_schedule=[0]
+                            )
+                            self.model.register_contract(change_contract)
+                            amount_due = 0
+                    
+                    # --- Payment Priority 2: Use Sugar ---
+                    if amount_due > 1e-6:
+                        payment_from_sugar = min(self.sugar, amount_due)
+                        self.sugar -= payment_from_sugar
+                        creditor.sugar += payment_from_sugar
+                        amount_due -= payment_from_sugar
+
+                    # --- Final Reconciliation: Check for Default ---
+                    if amount_due > 1e-6:
+                        # DEATH ON DEFAULT
                         self.model.update_contract_status(contract_id, ContractStatus.DEFAULTED)
+                        self.model._process_bankruptcy(self.unique_id)
+                        self.remove()
+                        return False # Exit method immediately
                     else:
                         self.model.update_contract_status(contract_id, ContractStatus.REPAID)
+        return True
+                    # --- END: New Repayment and Default Logic ---```
 
     def get_lending_offer(self, draft_contract: Contract, borrower_reservation_amount: float) -> float | None:
         """
@@ -388,8 +436,8 @@ class Trader(CellAgent):
         update biological state. The main branching logic has been removed.
         """
         self.sugar_harvested_this_step = 0.0
-        self.process_contract_maturities()
-
+        is_still_alive = self.process_contract_maturities()
+        if not is_still_alive: return
         # The new, cleaner decision-making process is now always called
         best_plan = self._find_best_plan()
         
@@ -409,6 +457,16 @@ class Trader(CellAgent):
         Function to remove agents who have consumed all their sugar.
         It now triggers the model's bankruptcy process before removal.
         """
+        log_data = {
+            "agent_id": self.unique_id,
+            "step": self.model.steps,
+            "event": "maybe_die_check",
+            "current_sugar": self.sugar,
+            "current_age": self.age,
+            "max_age": self.max_age,
+            "is_starved": int(self.is_starved()),
+        }
+        #self.model.db_logger.debug(self.model.run_id, json.dumps(log_data))
         if self.is_starved() or self.age >= self.max_age:
             self.model._process_bankruptcy(self.unique_id)
             self.remove()

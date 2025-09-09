@@ -221,9 +221,8 @@ class SugarscapeG1mt(mesa.Model):
         self.contracts_by_agent[old_creditor_id].discard(contract_id)
         self.contracts_by_agent[new_creditor_id].add(contract_id)
 
-        # Mark the original as closed since its primary creditor has changed.
-        self.update_contract_status(contract_id, ContractStatus.CLOSED)
-
+        # The contract remains ACTIVE, just with a new owner. Do not close it.
+        
     def split_contract(self, original_contract_id: int, split_definitions: List[tuple[float, int]]) -> List[int]:
         """
         Atomically splits an existing contract into multiple new ones based on a
