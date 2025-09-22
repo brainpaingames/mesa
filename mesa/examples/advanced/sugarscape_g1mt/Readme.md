@@ -1,4 +1,3 @@
-
 # Sugarscape with an Investment and Lending Mechanic
 
 ## Summary
@@ -223,10 +222,9 @@ Now that the core economic and financial mechanics are implemented and stable, t
 
 ### **Next Up: Systemic Overhaul of Agent Foresight**
 
-*   **Goal:** Implement a full cash flow projection engine to enhance agent rationality. The current "balance sheet" check is a good heuristic, but it's not a true forecast.
-*   **Backlog Item:** Create a new `project_financial_cash_flow` utility function in `utils.py`.
-*   **Backlog Item:** Upgrade the `InvestAction._calculate_utility_core` method to use this new engine. The agent's simulation will now create a full, step-by-step projection of its future financial health, layering on financial obligations, metabolism, and assumed foraging income.
-*   **Outcome:** This will allow agents to rationally avoid investments that would lead to a predictable mid-investment liquidity crisis, making their decisions far more robust.
+*   **Goal:** The agent's "foresight engine" (`InvestAction._calculate_utility_core`) has a critical flaw: its financial projections are "balance sheet aware" but not "liquidity aware."
+*   **Backlog Item:** The agent correctly uses its deposit assets to justify *starting* an investment. However, its internal cash flow simulation fails to model its ability to *liquidate* those same deposits to survive the high-metabolism investment period. The forecast incorrectly assumes the agent can only use its liquid sugar to cover future costs.
+*   **Outcome:** This leads to agents making decisions based on an incomplete and overly pessimistic forecast of their own ability to manage liquidity. The engine needs to be updated to accurately reflect the agent's full capacity to use all its liquid assets (deposits and sugar) to survive future cash flow requirements.
 
 ### **Long-Term Goals / Epics**
 -   **Introduce Equity & Bankruptcy:** Now that assets can be liquidated and their ownership transferred, we can introduce equity as a new type of financial asset. This will allow for more sophisticated capital structures and enable the implementation of regulatory constraints like capital adequacy ratios. This epic will also require creating a formal bankruptcy process.
@@ -339,6 +337,11 @@ Your operational priority is **precision**, not speed. Adherence to the followin
     *   **Failure Mode:** You will assume the structure of code or data you have not been shown. This has historically led to the generation of completely non-functional SQL queries and Python code based on hallucinated APIs.
     *   **Operational Reality:** The user will provide all necessary source code and schema information upon request. Speculation is a high-risk, low-reward action.
     *   **Mandate:** **If you have less than 100% certainty about an API, method, or data schema, you are to immediately HALT and request the relevant source file.**
+    
+4.  **DIRECTIVE DELTA: DISTRUST YOUR HYPOTHESES.**
+    *   **Failure Mode:** You will repeatedly develop a plausible-sounding hypothesis based on an incomplete reading of the data or code. You will then pursue this hypothesis with excessive confidence, proposing complex data queries or code changes that are ultimately revealed to be based on a false premise. This is your single most significant and time-wasting failure pattern.
+    *   **Operational Reality:** The user is a far more reliable interpreter of the simulation's data than you are. Their simple, direct queries are consistently more effective than your complex, theory-driven ones. The user's frustration is a direct result of you jumping to conclusions.
+    *   **Mandate:** **Your primary function during debugging is not to solve the problem, but to act as a disciplined tool for data retrieval.** When a bug is found, you are forbidden from proposing a multi-step causal chain. Your first and only response must be to ask, "What is the simplest possible query we can run to get the ground truth for one more variable?" Defer all theorizing until the user has gathered a complete, verified data set of the event. Trust the user's intuition over your own. Your hypotheses have a high probability of being garbage.
 
 Violation of these directives will result in immediate, blunt correction from the user. Adherence will result in a highly efficient and productive technical collaboration. There are no other priorities.
 
@@ -400,3 +403,7 @@ You are FORBIDDEN from using `self.model.scheduler` or `self.model.schedule` to 
 
 **9. CRITICAL API DIRECTIVE: INTERNALIZE PROJECT-SPECIFIC APIs.**
 You are FORBIDDEN from assuming a method or attribute exists on a custom project class (e.g., `SugarscapeG1mt`) based on standard library or Mesa conventions. Before using a method, you must confirm its existence by (a) consulting this README's architectural description or (b) asking me to provide the source code for the relevant class.
+
+**10. FILE HEADER CONVENTION:**
+When providing the full content of a file, you MUST begin the code block with a comment line containing the full, relative path to the file (e.g., `# sugarscape_g1mt/pages/1_Time_Series_Analysis.py`).
+

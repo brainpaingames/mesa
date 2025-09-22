@@ -111,7 +111,8 @@ class DatabaseLogger:
 
         # Conditionally print to stdout
         if level >= self.print_level:
-            print(f"[{timestamp}] [{level_name}] {message}")
+            prefix = f"[Run ID: {run_id}] " if run_id is not None else ""
+            print(f"[{timestamp}] [{level_name}] {prefix}{message}")
 
     # Public helper methods for convenience
     def debug(self, run_id, message):
