@@ -24,10 +24,10 @@ Write-Host "Working directory set to: $projectRoot" -ForegroundColor Gray
 
 # Start a timer for the total batch runtime
 $total_start_time = Get-Date
-Clear-Host
+#Clear-Host
 Write-Host ">>> Starting full experiment batch at $total_start_time" -ForegroundColor Green
 Write-Host "-------------------------------------------------------------"
-
+<#
 # --- Experiment 1: Baseline (No Investments, No Lending) ---
 Write-Host "`n[1/4] Running: Baseline Experiment..." -ForegroundColor Cyan
 $run1_start = Get-Date
@@ -74,7 +74,7 @@ python -m sugarscape_g1mt.run_batch --run_group "baseline_investments" `
 $run2_duration = (Get-Date) - $run2_start
 Write-Host ("`n`t- Investments run finished in {0}" -f $run2_duration.ToString('hh\:mm\:ss')) -ForegroundColor Yellow
 Write-Host "-------------------------------------------------------------"
-
+#>
 
 # --- Experiment 3: Investments and Lending Enabled ---
 Write-Host "`n[3/4] Running: Lending-Enabled Experiment..." -ForegroundColor Cyan
