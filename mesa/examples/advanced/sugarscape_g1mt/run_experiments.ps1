@@ -81,7 +81,7 @@ Write-Host "`n[3/4] Running: Lending-Enabled Experiment..." -ForegroundColor Cya
 $run3_start = Get-Date
 
 python -m sugarscape_g1mt.run_batch --run_group "baseline_lending" `
-    --total_steps 600 `
+    --total_steps 150 `
     --replications 1 `
     --initial_population "[200]" `
     --agent_re_spawn true `
@@ -103,8 +103,8 @@ Write-Host "-------------------------------------------------------------"
 Write-Host "`n[4/4] Running: Deposits-Enabled Experiment..." -ForegroundColor Cyan
 $run4_start = Get-Date
 
-python -m sugarscape_g1mt.run_batch --run_group "baseline_deposits" `
-    --total_steps 600 `
+python -u -m sugarscape_g1mt.run_batch --run_group "baseline_deposits" `
+    --total_steps 150 `
     --replications 1 `
     --initial_population "[200]" `
     --agent_re_spawn true `

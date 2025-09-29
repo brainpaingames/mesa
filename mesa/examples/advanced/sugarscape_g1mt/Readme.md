@@ -22,10 +22,20 @@ Key features of this simulation framework include:
 
 ### The Strategy/Action Decision Engine
 
-The agent's "brain" has been refactored into a formal, object-oriented architecture to support complex, multi-step financial planning.
--   **`Action` Classes:** These are the fundamental "verbs" of the simulation (e.g., `ForageAction`, `InvestAction`, `TakeLoanAction`). Each `Action` class is an expert at its one job, knowing how to simulate its own impact and execute itself. Crucially, "enabler" actions like `TakeLoanAction` also contain a `find_best_instance` class method, which encapsulates the complex logic of discovering the parameters for that action (e.g., polling for lenders, negotiating interest).
--   **The `Strategy` Class:** This is a generic "thinking engine." It is initialized with a "core action" (a goal) and a "tool-kit" of available action types. Its `evaluate()` method then runs a simulation to find the optimal sequence of actions—including pre-actions from its tool-kit—to best achieve the goal. It is a generic planner that knows nothing specific about loans or deposits, only how to combine actions and compare outcomes.
--   **The `Trader` Agent:** The agent itself is now a high-level orchestrator. Its `_find_best_plan()` method assembles the tool-kit of available actions based on simulation flags (e.g., `lending_enabled`), generates a list of candidate `Strategy` objects, and then runs a "tournament" to find the one with the highest utility. It then executes the winning strategy's action plan.
+The agent's "brain" has been refactored into a formal, object-oriented architecture to support complex, multi-step financial planning. This architecture relies on a clear separation between different levels of foresight.
+
+*   **The Three Tiers of Foresight:** To prevent conceptual bugs, the agent's decision-making process is separated into three distinct tiers:
+    1.  **The Time Step:** The main Mesa `model.step()` that advances the entire world's clock from T to T+1. This is the ground truth.
+    2.  **The Plan Simulation:** The process within a `Strategy` that simulates a single sequence of actions (a `plan`) to determine its immediate, end-of-step outcome. It answers the question: "If I do exactly this, what will my state be at the end of this Time Step?"
+    3.  **The Utility Forecast:** A specialized, long-term projection run *only* by certain actions (like `InvestAction`) to estimate their value over a distant future horizon. It answers the question: "If I commit to this action now, what is its total eventual worth?"
+
+*   **`PlanningState` Object:** To support the **Plan Simulation**, the engine uses a temporary `PlanningState` object. This is a lightweight data object that holds the mutable state (sugar, portfolio, etc.) for a "what-if" scenario. The real `Trader` agent is treated as a read-only "context" for model and environmental data, while the `PlanningState` acts as the writeable "scratchpad."
+
+*   **`Action` Classes:** These are the fundamental "verbs" of the simulation (e.g., `ForageAction`, `InvestAction`, `TakeLoanAction`). Each `Action` class knows how to execute itself in the real world and how to simulate its own impact on a `PlanningState` object during a **Plan Simulation**.
+
+*   **The `Strategy` Class:** This is the "thinking engine" that finds the best `plan` for a given goal. Its `find_best_plan()` method generates multiple candidate plans (e.g., investing with or without a loan), runs a **Plan Simulation** on each one to determine its outcome, compares the results, and selects the winner.
+
+*   **The `Trader` Agent:** The agent is the high-level orchestrator. In each **Time Step**, its `_find_best_strategy()` method evaluates all available `Strategy` objects (e.g., Foraging vs. Investing) and executes the plan from the winning strategy.
 
 ### Dynamic, Level-Based Investments
 
@@ -196,22 +206,23 @@ C:.
 
 ## Development Backlog
 
-### **COMPLETED: Implement "Constant Payback" Economics & Rationalize Asset Liquidation**
+### **COMPLETED RECENTLY**
 
-This epic successfully addressed a fundamental flaw in the previous investment model and completely re-architected how agents handle financial distress, paving the way for emergent liquidity crises.
+*   **Epic: Stabilize Agent Financial Planning & Fix State Corruption Bug**
+    *   **Description:** This epic addressed a critical, subtle bug where agents would make irrational, suicidal financial plans involving taking a loan to invest and then immediately depositing an amount of sugar they did not possess.
+    *   **Root Cause Analysis:** We traced the bug to a state corruption issue within the agent's planning engine. The long-term **Utility Forecast** (run by `InvestAction`) was incorrectly modifying the mutable **`PlanningState`** object that was being used by the higher-level **Plan Simulation**. This "polluted" state, containing a fantasy future sugar value, was then passed to post-action planners, leading to irrational decisions.
+    *   **Resolution:** The architecture was refactored to enforce a clean separation of concerns. The `_forecast_utility` method now operates on a private, local copy of the state, preventing it from having side effects on the main Plan Simulation. This ensures all parts of the planning process operate on a consistent and correct view of the agent's projected end-of-step state.
 
-*   **Part 1: The New Economic Model.** We successfully diagnosed the "Investment Trap" where agents were being bankrupted by their own investments and replaced the entire economic physics.
-    *   **DONE:** Diagnosed the critical bug where an agent's metabolism was permanently increased after an investment, creating a death spiral.
-    *   **DONE:** Implemented the "Constant Payback" model, replacing the old "upfront cost" with a **capital requirement** check based on an agent's full balance sheet (`sugar + deposits`).
-    *   **DONE:** Fixed the metabolism bug by correctly storing an agent's `base_metabolism` and restoring it after an investment period completes. This fix produced the expected exponential growth in society-wide wealth.
+*   **Architectural Refactor: Clarify Planning Vocabulary**
+    *   **Description:** To support the bug fix and improve code clarity, a comprehensive renaming was performed across the planning-related modules (`agents.py`, `actions.py`, `strategies.py`).
+    *   **Changes:**
+        *   `SimulatedAgent` -> `PlanningState`
+        *   `agent._find_best_plan()` -> `agent._find_best_strategy()`
+        *   `strategy.evaluate()` -> `strategy.find_best_plan()`
+        *   `InvestAction._calculate_utility_core()` -> `InvestAction._forecast_utility()`
+    *   **Benefit:** This makes the code self-documenting and dramatically improves maintainability by preventing the kind of conceptual confusion that led to the recent bug.
 
-*   **Part 2: The Unified "Get Cash" System.** We unified two separate, conflicting systems for asset liquidation into a single, rational, and robust agent capability.
-    *   **DONE:** Replaced the separate `_liquidate_deposits` reflex and the planned `CallDepositAction` with a single, powerful "smart factory" action, **`RaiseSugarFromDepositsAction`**.
-    *   **DONE:** This new action now implements a sophisticated **"priority cascade"** within the `Strategy` engine. To cover a deficit, an agent's first choice is to **sell** its deposit asset on the open market.
-    *   **DONE:** Only if a market sale fails, the agent's plan will **fall back** to a direct **withdrawal** from the original issuer of the deposit.
-    *   **DONE:** The withdrawal logic was made robustly iterative, allowing an agent to create a plan to call multiple deposits to cover a single large deficit.
-
-### **IN PROGRESS: Elicit Emergent Phenomena & Test Stylized Regulation**
+### **NEXT UP / IN PROGRESS**
 
 Now that the core economic and financial mechanics are implemented and stable, the immediate next step is to use the model as a scientific instrument. This epic focuses on running targeted experiments to generate and analyze complex emergent behaviors and to test the effects of simple policy interventions.
 
@@ -219,8 +230,15 @@ Now that the core economic and financial mechanics are implemented and stable, t
 *   **Method:** Run a series of targeted experiments, varying parameters like sugar regrowth rates or agent density to create economic "shocks" that stress-test the financial system.
 *   **Analysis:** Use the database and analysis dashboard to closely examine agent-level data during these events, tracing the causal chain of failures as they propagate through the ledger.
 *   **Next Step: Stylized Regulation.** Once the failure modes are well-understood, the next task is to implement a simple regulatory rule, such as a **"required sugar reserve"** for agents who accept deposits, and to run comparative experiments to measure its effect on market stability.
+*   **Investigate and Optimize Late-Game Performance Degradation**
+    *   **Issue:** The simulation runs quickly in early steps but can slow to a crawl in later steps as the economy becomes more complex.
+    *   **Hypothesis:** The performance cost of some agent decision-making functions (e.g., `get_deposit_offer`) appears to scale with the number of active contracts on the central ledger. When many agents poll many wealthy "banker" agents, the total number of calculations per Time Step can explode.
+    *   **Task:** Use profiling to confirm the bottleneck and investigate architectural or algorithmic optimizations to ensure the model remains performant in complex economic states.
 
-### **Next Up: Systemic Overhaul of Agent Foresight**
+*   **Refactor Harvest Calculation into a Pure Utility Function**
+    *   **Issue:** The logic for scanning an agent's vision to find the best sugar patch is currently duplicated. It exists in the `Trader` agent for foraging decisions and was re-implemented inside the `InvestAction` for forecasting.
+    *   **Task:** Create a single, pure helper function in `utils.py` for calculating the max potential harvest. Refactor both the `Trader` agent's perception and the `InvestAction`'s forecast to use this single, authoritative function.
+    *   **Benefit:** This will eliminate duplicated code, increase purity, and make the core harvest mechanic more robust and easily testable.
 
 *   **Goal:** The agent's "foresight engine" (`InvestAction._calculate_utility_core`) has a critical flaw: its financial projections are "balance sheet aware" but not "liquidity aware."
 *   **Backlog Item:** The agent correctly uses its deposit assets to justify *starting* an investment. However, its internal cash flow simulation fails to model its ability to *liquidate* those same deposits to survive the high-metabolism investment period. The forecast incorrectly assumes the agent can only use its liquid sugar to cover future costs.

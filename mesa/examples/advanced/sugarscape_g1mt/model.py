@@ -17,7 +17,7 @@ from collections import defaultdict
 from .contracts import Contract, ContractStatus, ContractType
 from dataclasses import asdict
 from .utils import Gini, load_config
-
+import sys
 
 class SugarscapeG1mt(mesa.Model):
     """
@@ -405,5 +405,11 @@ class SugarscapeG1mt(mesa.Model):
                 self.db_logger.log_spatial_layer(self.run_id, self.steps, "sugar", self.grid.sugar.data)
 
     def run_model(self, step_count=1000):
-        for _ in range(step_count):
+        for i in range(step_count):
+            # Construct the progress string
+            progress_string = f"  - Running step {i + 1}/{step_count}"
+        
+            # Print with carriage return and no newline, then flush
+            print(progress_string, end='\r', flush=True)
             self.step()
+        print()

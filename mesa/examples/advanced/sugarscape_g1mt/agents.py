@@ -343,6 +343,24 @@ class Trader(CellAgent):
 
         return self.random.choice(final_candidates)
     
+    def _find_nominal_max_harvest(self) -> float:
+        """
+        Finds the best nominal (un-multiplied) sugar patch in vision.
+        This is a helper for the Utility Forecast, providing a stable baseline
+        for long-term projections.
+        """
+        vision = self.get_capability('vision')
+        neighboring_cells = self.cell.get_neighborhood(vision, include_center=True)
+        
+        max_sugar = 0
+        for cell in neighboring_cells:
+            # Robustly get sugar from the grid's data layer, not the cell property
+            col, row = cell.coordinate
+            sugar_on_cell = self.model.grid.sugar.data[row, col]
+            if sugar_on_cell > max_sugar:
+                max_sugar = sugar_on_cell
+        return max_sugar
+
     def eat(self):
         """
         Agent harvests sugar from its current cell.

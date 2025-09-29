@@ -205,87 +205,90 @@ class InvestAction(Action):
         """An investment can be enabled by taking a loan."""
         return [TakeLoanAction]
 
-    def _forecast_utility(self, agent: Trader, horizon: int, hypothetical_loan=None, starting_planning_state=None) -> tuple[float, bool]:
+    def _forecast_utility(self, agent: Trader, horizon: int, nominal_max_harvest: float, hypothetical_loan=None, starting_planning_state=None) -> tuple[float, bool]:
         """
-        Internal forecasting engine.
-        Calculates the forecasted utility (final sugar) of undertaking this investment.
+        Internal forecasting engine. It isolates dependencies at the top and then
+        runs a pure calculation on a local state dictionary.
         Returns a tuple of (utility, is_death).
         """
-        # Determine the starting state for the simulation
+        # Determine the initial state for the forecast.
         if starting_planning_state:
-            planning_state = starting_planning_state
-        elif isinstance(agent, PlanningState):
-            planning_state = agent
+            initial_state = starting_planning_state
         else:
-            planning_state = PlanningState(agent)
+            initial_state = PlanningState(agent)
+
+        # --- "Impure" Setup Block ---
+        # 1. Extract all necessary parameters from the agent and model into local variables.
+        spoilage_rate = agent.spoilage_rate
+        base_metabolism = agent.base_metabolism
+        current_step = agent.model.steps
         
-        # If a hypothetical loan is passed for a "what-if" scenario, add its principal
+        # 2. Manually construct a simple, local state dictionary for the forecast sandbox.
+        forecast_state = {
+            'sugar': initial_state.sugar,
+            'harvest_investment_level': initial_state.harvest_investment_level,
+            'sim_portfolio': copy.deepcopy(initial_state.sim_portfolio) # This is safe
+        }
+
+        # 3. Handle the hypothetical loan's effect on the sandbox state.
         if hypothetical_loan:
-            planning_state.sugar += hypothetical_loan.principal
+            forecast_state['sugar'] += hypothetical_loan.principal
 
-        # New "Balance Sheet" affordability check
-        if (planning_state.sugar + planning_state.get_total_deposit_principal()) < self.capital_requirement:
-            return -1, True # Dies immediately if they can't afford the capital requirement
-
-        # Get the agent's current contracts for the simulation
-        agent_contract_ids = planning_state.real_agent.model.contracts_by_agent.get(planning_state.real_agent.unique_id, set())
-        agent_contracts = [planning_state.real_agent.model.contracts_by_id[cid] for cid in agent_contract_ids if planning_state.real_agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
-
-        # Also include the hypothetical loan in the contract list for cash flow projection
+        # 4. Pre-process the ledger to create a simple future cash flow map.
+        future_cash_flows = {}
+        agent_contract_ids = agent.model.contracts_by_agent.get(agent.unique_id, set())
+        agent_contracts = [agent.model.contracts_by_id[cid] for cid in agent_contract_ids if agent.model.contracts_by_id[cid].status == ContractStatus.ACTIVE]
         if hypothetical_loan:
             agent_contracts.append(hypothetical_loan)
 
-        # 1. Simulate survival during the investment period
-        cost_duration = self.duration
-        # The agent must survive the investment period AND the step it completes
-        metabolism_cost_steps = cost_duration + 1
-        
-        for i in range(metabolism_cost_steps):
-            current_sim_step = planning_state.real_agent.model.steps + 1 + i
-            # --- Ledger-Aware Cash Flow Projection ---
-            for contract in agent_contracts:
-                if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
-                    if contract.creditor_id == planning_state.real_agent.unique_id:
-                        planning_state.sugar += contract.total_repayment_amount
-                    elif contract.debtor_id == planning_state.real_agent.unique_id:
-                        planning_state.sugar -= contract.total_repayment_amount
-            # --- End Ledger-Aware ---
+        for contract in agent_contracts:
+            if contract.contract_type == ContractType.TERM_LOAN:
+                due_step = contract.due_step
+                if contract.creditor_id == agent.unique_id:
+                    future_cash_flows[due_step] = future_cash_flows.get(due_step, 0) + contract.total_repayment_amount
+                elif contract.debtor_id == agent.unique_id:
+                    future_cash_flows[due_step] = future_cash_flows.get(due_step, 0) - contract.total_repayment_amount
 
-            planning_state.sugar *= (1 - planning_state.real_agent.spoilage_rate) # Sugar spoils
-            planning_state.sugar -= self.metabolism_during_investment
-            
-            # This simulation does not yet account for the "just-in-time" liquidation reflex.
-            # It assumes the initial balance sheet is sufficient.
-            if planning_state.sugar <= 0:
-                return -1, True # Agent dies during investment
-        
-        # 2. Apply the reward and forecast the rest of the horizon
-        # The "reward" is the new investment level for the planning_state
-        planning_state.harvest_investment_level = self.target_level
+        # --- "Pure" Execution Block ---
+        # All subsequent logic operates ONLY on the forecast_state dictionary and local variables.
+        total_deposits = sum(c.current_principal for c in forecast_state['sim_portfolio'].values())
+        if (forecast_state['sugar'] + total_deposits) < self.capital_requirement:
+            return -1, True
+
+        # 1. Simulate survival during the investment period.
+        metabolism_cost_steps = self.duration + 1
+        for i in range(metabolism_cost_steps):
+            sim_step = current_step + 1 + i
+            forecast_state['sugar'] += future_cash_flows.get(sim_step, 0)
+            forecast_state['sugar'] *= (1 - spoilage_rate)
+            forecast_state['sugar'] -= self.metabolism_during_investment
+            if forecast_state['sugar'] <= 0:
+                return -1, True
+
+        # 2. Apply the reward and forecast the rest of the horizon.
+        forecast_state['harvest_investment_level'] = self.target_level
         
         remaining_horizon = horizon - metabolism_cost_steps
         if remaining_horizon > 0:
-            expected_harvest = planning_state.get_max_potential_harvest()
-            metabolism_after_investment = planning_state.real_agent.base_metabolism
-            
-            for i in range(remaining_horizon):
-                current_sim_step = planning_state.real_agent.model.steps + 1 + metabolism_cost_steps + i
-                # --- Ledger-Aware Cash Flow Projection ---
-                for contract in agent_contracts:
-                    if contract.contract_type == ContractType.TERM_LOAN and contract.due_step == current_sim_step:
-                        if contract.creditor_id == planning_state.real_agent.unique_id:
-                            planning_state.sugar += contract.total_repayment_amount
-                        elif contract.debtor_id == planning_state.real_agent.unique_id:
-                            planning_state.sugar -= contract.total_repayment_amount
-                # --- End Ledger-Aware ---
+            # Calculate the new multiplier based on the upgraded level.
+            new_multiplier = get_harvest_multiplier(
+                level=forecast_state['harvest_investment_level'],
+                base_multiplier=agent.investment_params.get("base_harvest_multiplier", 1.0),
+                growth_factor=agent.investment_params.get("benefit_growth_factor", 1.0)
+            )
+            # The expected harvest is now a simple calculation.
+            expected_harvest = nominal_max_harvest * new_multiplier
 
-                planning_state.sugar += expected_harvest
-                planning_state.sugar *= (1 - planning_state.real_agent.spoilage_rate) # Sugar spoils
-                planning_state.sugar -= metabolism_after_investment
-                if planning_state.sugar <= 0:
-                    return -1, True # Dies after investing, but before horizon ends
+            for i in range(remaining_horizon):
+                sim_step = current_step + 1 + metabolism_cost_steps + i
+                forecast_state['sugar'] += future_cash_flows.get(sim_step, 0)
+                forecast_state['sugar'] += expected_harvest
+                forecast_state['sugar'] *= (1 - spoilage_rate)
+                forecast_state['sugar'] -= base_metabolism
+                if forecast_state['sugar'] <= 0:
+                    return -1, True
         
-        return planning_state.sugar, False
+        return forecast_state['sugar'], False
 
     def simulate(self, planning_state: PlanningState) -> tuple[float, PlanningState]:
         """
@@ -293,13 +296,23 @@ class InvestAction(Action):
         long-term utility by calling the internal forecasting engine.
         """
         horizon = self.agent.get_capability("agent_look_ahead_horizon")
-        final_sugar, is_death = self._forecast_utility(self.agent, horizon, starting_planning_state=planning_state)
+        
+        # Get the nominal harvest from the real agent's perception before forecasting.
+        nominal_max_harvest = self.agent._find_nominal_max_harvest()
+        
+        # Call the forecast engine, which now operates purely and won't modify our planning_state.
+        forecasted_utility, is_death = self._forecast_utility(
+            self.agent, 
+            horizon, 
+            nominal_max_harvest,
+            starting_planning_state=planning_state
+        )
 
         if is_death:
             return -math.inf, planning_state
         
-        planning_state.sugar = final_sugar
-        return final_sugar, planning_state
+        # THE FIX: Return the forecasted_utility and the ORIGINAL, UNMODIFIED planning_state.
+        return forecasted_utility, planning_state
 
     def calculate_utility_with_loan(self, agent: Trader, hypothetical_loan: Contract) -> tuple[float, bool]:
         """
@@ -307,8 +320,15 @@ class InvestAction(Action):
         This is used by the Strategy class to evaluate loan-funded scenarios.
         """
         horizon = agent.get_capability("agent_look_ahead_horizon")
-        # Pass the hypothetical loan down to the core calculator.
-        return self._forecast_utility(agent, horizon, hypothetical_loan=hypothetical_loan)
+        nominal_max_harvest = agent._find_nominal_max_harvest()
+        
+        # Pass the hypothetical loan and nominal harvest down to the core calculator.
+        return self._forecast_utility(
+            agent, 
+            horizon,
+            nominal_max_harvest,
+            hypothetical_loan=hypothetical_loan
+        )
 
     def execute(self):
         """Sets the agent's state to 'investing'."""
