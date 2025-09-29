@@ -378,7 +378,7 @@ class Trader(CellAgent):
         self.maybe_die()
 
 
-    def _find_best_plan(self):
+    def _find_best_strategy(self):
         """
         The agent's "brain". It creates a "tournament" of possible strategies,
         evaluates them, and returns the action plan of the winner. This method
@@ -396,7 +396,7 @@ class Trader(CellAgent):
             # However, it can still use its post-action reflexes to survive.
             pre_action_kit = [] # No pre-actions needed when continuing
             continue_strategy = Strategy(ContinueInvestmentAction(self), pre_action_kit, post_action_kit)
-            continue_strategy.evaluate(self)
+            continue_strategy.find_best_plan(self)
             return continue_strategy.get_action_plan()
         
         else:
@@ -407,7 +407,7 @@ class Trader(CellAgent):
 
             # Establish the baseline strategy (Foraging)
             forage_strategy = Strategy(ForageAction(self), pre_action_kit, post_action_kit)
-            baseline_utility = forage_strategy.evaluate(self)
+            baseline_utility = forage_strategy.find_best_plan(self)
             
             candidate_strategies = [forage_strategy]
 
@@ -417,7 +417,7 @@ class Trader(CellAgent):
                 invest_action = InvestAction(self, target_level=next_level, investment_params=self.investment_params)
                 
                 invest_strategy = Strategy(invest_action, pre_action_kit, post_action_kit)
-                invest_strategy.evaluate(self, baseline_utility=baseline_utility)
+                invest_strategy.find_best_plan(self, baseline_utility=baseline_utility)
                 candidate_strategies.append(invest_strategy)
 
             if not candidate_strategies:
@@ -439,7 +439,7 @@ class Trader(CellAgent):
         is_still_alive = self.process_contract_maturities()
         if not is_still_alive: return
         # The new, cleaner decision-making process is now always called
-        best_plan = self._find_best_plan()
+        best_plan = self._find_best_strategy()
         
         # Execute the sequence of actions in the winning plan
         if best_plan:

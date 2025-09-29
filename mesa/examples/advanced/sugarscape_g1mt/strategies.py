@@ -5,8 +5,8 @@ import math
 import json
 from typing import TYPE_CHECKING, List, Type
 
-# The import of SimulatedAgent is now from .actions
-from .actions import Action, InvestAction, TakeLoanAction, SimulatedAgent
+# The import of PlanningState is now from .actions
+from .actions import Action, InvestAction, TakeLoanAction, PlanningState
 from .contracts import Contract, ContractType
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class Strategy:
         """Returns the final, ordered list of actions for execution."""
         return self.final_plan
 
-    def evaluate(self, agent: Trader, baseline_utility: float = 0) -> float:
+    def find_best_plan(self, agent: Trader, baseline_utility: float = 0) -> float:
         """
         The main "thinking engine". It evaluates all valid combinations of pre-
         and post-actions around the core action and selects the best one.
@@ -85,13 +85,13 @@ class Strategy:
         
         if self.post_action_kit and current_best_utility > -math.inf:
             # First, get the simulated state *after* the best core plan has run
-            _, final_sim_agent_state = self._simulate_plan(agent, current_best_plan)
+            _, final_planning_state = self._simulate_plan(agent, current_best_plan)
 
             for post_action_type in self.post_action_kit:
                 # Ask the PostAction class to find an instance of itself based on the final state
                 post_action = post_action_type.find_best_instance(
                     agent=agent, 
-                    sim_agent_state=final_sim_agent_state, 
+                    planning_state=final_planning_state, 
                     core_action_utility=current_best_utility
                 )
 
@@ -107,8 +107,8 @@ class Strategy:
                         # improves things, we adopt it. It doesn't re-evaluate other post-actions.
                         current_best_utility = new_utility
                         current_best_plan = new_plan_with_post_action
-                        # We also need to update the sim_agent_state for the next iteration
-                        _, final_sim_agent_state = self._simulate_plan(agent, current_best_plan)
+                        # We also need to update the planning_state for the next iteration
+                        _, final_planning_state = self._simulate_plan(agent, current_best_plan)
 
 
         # --- Finalize the strategy's outcome ---
@@ -118,15 +118,15 @@ class Strategy:
         
         return self.utility
 
-    def _simulate_plan(self, agent: Trader, plan: List[Action]) -> tuple[float, SimulatedAgent]:
+    def _simulate_plan(self, agent: Trader, plan: List[Action]) -> tuple[float, PlanningState]:
         """Helper to simulate a complete sequence of actions."""
-        sim_agent = SimulatedAgent(agent)
+        planning_state = PlanningState(agent)
         final_utility = -math.inf
 
         for action in plan:
-            final_utility, sim_agent = action.simulate(sim_agent)
+            final_utility, planning_state = action.simulate(planning_state)
             if final_utility == -math.inf:
                 # If any step in the plan fails, the whole plan fails.
-                return -math.inf, sim_agent
+                return -math.inf, planning_state
         
-        return final_utility, sim_agent
+        return final_utility, planning_state
